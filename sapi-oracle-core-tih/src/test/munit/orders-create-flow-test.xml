@@ -1,0 +1,163 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns:munit="http://www.mulesoft.org/schema/mule/munit"
+	xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+		http://www.mulesoft.org/schema/mule/munit http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+		http://www.mulesoft.org/schema/mule/munit-tools http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd">
+
+	<munit:config name="orders-create-flow-test.xml"/>
+
+	<!-- Flujos auxiliares: simulan los errores de llave foránea de Oracle (ORA-02291) y aplican
+	     el manejador real db-order-constraint-handler. -->
+	<flow name="test-order-fk-customer-flow">
+		<raise-error type="APP:TEST" description="ORA-02291: integrity constraint (STORE_APP.FK_ORDERS_CUSTOMER) violated - parent key not found"/>
+		<error-handler ref="db-order-constraint-handler"/>
+	</flow>
+
+	<flow name="test-order-fk-inventory-flow">
+		<raise-error type="APP:TEST" description="ORA-02291: integrity constraint (STORE_APP.FK_ORDERS_INVENTORY) violated - parent key not found"/>
+		<error-handler ref="db-order-constraint-handler"/>
+	</flow>
+
+	<flow name="test-order-other-error-flow">
+		<raise-error type="APP:TEST" description="ORA-12899: value too large for column"/>
+		<error-handler ref="db-order-constraint-handler"/>
+	</flow>
+
+	<!-- Propósito: POST /orders registra todas las líneas y responde 201 con el Order y su total.
+	     Escenario: el pedido no existe, Oracle (mock) acepta el insert masivo.
+	     Resultado esperado: 201, 2 líneas, total 2609.95, fecha UTC y un parámetro de inserción por línea. -->
+	<munit:test name="ordersCreate_whenNewOrder_thenReturn201WithTotal"
+		description="Registra el pedido y devuelve el Order con su total">
+		<munit:behavior>
+			<munit-tools:mock-when processor="db:select">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="db-select-order-exists"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/java --- [{ TOTAL: 0 }]]" mediaType="application/java"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit-tools:mock-when processor="db:bulk-insert">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="db-bulk-insert-order-lines"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/java --- [1, 1]]" mediaType="application/java"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+		</munit:behavior>
+		<munit:execution>
+			<munit:set-event>
+				<munit:payload value="#[output application/json --- readUrl('classpath://payloads/order-create-request.json', 'application/json')]" mediaType="application/json"/>
+			</munit:set-event>
+			<flow-ref name="post:\orders:application\json:sapi-oracle-core-tih-config"/>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[vars.httpStatus]" is="#[MunitTools::equalTo(201)]"/>
+			<munit-tools:assert-that expression="#[payload.id]" is="#[MunitTools::equalTo('9d8c7b6a-5f4e-4d3c-8b2a-1f0e9d8c7b6a')]"/>
+			<munit-tools:assert-that expression="#[payload.customerId]" is="#[MunitTools::equalTo('3f2b8c1e-7a4d-4e5b-9c0a-1d2e3f4a5b6c')]"/>
+			<munit-tools:assert-that expression="#[sizeOf(payload.items)]" is="#[MunitTools::equalTo(2)]"/>
+			<munit-tools:assert-that expression="#[payload.total as String]" is="#[MunitTools::equalTo('2609.95')]"/>
+			<munit-tools:assert-that expression="#[payload.creationDate]" is="#[MunitTools::endsWith('Z')]"/>
+			<munit-tools:assert-that expression="#[sizeOf(vars.orderBulkParams)]" is="#[MunitTools::equalTo(2)]"/>
+			<munit-tools:assert-that expression="#[vars.orderBulkParams[0].creationDate == vars.orderBulkParams[1].creationDate]" is="#[MunitTools::equalTo(true)]"/>
+			<munit-tools:verify-call processor="db:bulk-insert" times="1">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="db-bulk-insert-order-lines"/>
+				</munit-tools:with-attributes>
+			</munit-tools:verify-call>
+		</munit:validation>
+	</munit:test>
+
+	<!-- Propósito: no se registra dos veces el mismo pedido.
+	     Escenario: Oracle (mock) indica que ya hay 2 filas con ese id. Resultado esperado: APP:ORDER_ALREADY_EXISTS y no se inserta. -->
+	<munit:test name="ordersCreate_whenOrderAlreadyExists_thenRaiseOrderAlreadyExists"
+		description="Rechaza un pedido cuyo id ya está registrado"
+		expectedErrorType="APP:ORDER_ALREADY_EXISTS">
+		<munit:behavior>
+			<munit-tools:mock-when processor="db:select">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="db-select-order-exists"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/java --- [{ TOTAL: 2 }]]" mediaType="application/java"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+		</munit:behavior>
+		<munit:execution>
+			<munit:set-event>
+				<munit:payload value="#[output application/json --- readUrl('classpath://payloads/order-create-request.json', 'application/json')]" mediaType="application/json"/>
+			</munit:set-event>
+			<flow-ref name="post:\orders:application\json:sapi-oracle-core-tih-config"/>
+		</munit:execution>
+	</munit:test>
+
+	<!-- Propósito: si Oracle cae a mitad del registro el error se propaga (503) y la transacción se revierte.
+	     Escenario: el insert masivo falla con DB:CONNECTIVITY. Resultado esperado: DB:CONNECTIVITY. -->
+	<munit:test name="ordersCreate_whenDatabaseFailsOnInsert_thenPropagateConnectivityError"
+		description="Propaga DB:CONNECTIVITY si falla el insert masivo"
+		expectedErrorType="DB:CONNECTIVITY">
+		<munit:behavior>
+			<munit-tools:mock-when processor="db:select">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="db-select-order-exists"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/java --- [{ TOTAL: 0 }]]" mediaType="application/java"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit-tools:mock-when processor="db:bulk-insert">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="db-bulk-insert-order-lines"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:error typeId="DB:CONNECTIVITY"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+		</munit:behavior>
+		<munit:execution>
+			<munit:set-event>
+				<munit:payload value="#[output application/json --- readUrl('classpath://payloads/order-create-request.json', 'application/json')]" mediaType="application/json"/>
+			</munit:set-event>
+			<flow-ref name="post:\orders:application\json:sapi-oracle-core-tih-config"/>
+		</munit:execution>
+	</munit:test>
+
+	<!-- Propósito: un cliente inexistente (llave foránea FK_ORDERS_CUSTOMER) se traduce en 404 de cliente.
+	     Resultado esperado: APP:CUSTOMER_NOT_FOUND. -->
+	<munit:test name="ordersCreate_whenCustomerForeignKeyFails_thenRaiseCustomerNotFound"
+		description="Traduce ORA-02291 de FK_ORDERS_CUSTOMER en APP:CUSTOMER_NOT_FOUND"
+		expectedErrorType="APP:CUSTOMER_NOT_FOUND">
+		<munit:execution>
+			<flow-ref name="test-order-fk-customer-flow"/>
+		</munit:execution>
+	</munit:test>
+
+	<!-- Propósito: un artículo inexistente (llave foránea FK_ORDERS_INVENTORY) se traduce en 400.
+	     Resultado esperado: APP:VALIDATION_ERROR. -->
+	<munit:test name="ordersCreate_whenInventoryForeignKeyFails_thenRaiseValidationError"
+		description="Traduce ORA-02291 de FK_ORDERS_INVENTORY en APP:VALIDATION_ERROR"
+		expectedErrorType="APP:VALIDATION_ERROR">
+		<munit:execution>
+			<flow-ref name="test-order-fk-inventory-flow"/>
+		</munit:execution>
+	</munit:test>
+
+	<!-- Propósito: otros errores de Oracle no se disfrazan de errores de negocio.
+	     Resultado esperado: el error original sigue su camino. -->
+	<munit:test name="ordersCreate_whenOtherDatabaseErrorOccurs_thenKeepOriginalError"
+		description="No traduce errores que no son de llave foránea"
+		expectedErrorType="APP:TEST">
+		<munit:execution>
+			<flow-ref name="test-order-other-error-flow"/>
+		</munit:execution>
+	</munit:test>
+
+</mule>

@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:sftp="http://www.mulesoft.org/schema/mule/sftp"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/sftp http://www.mulesoft.org/schema/mule/sftp/current/mule-sftp.xsd
+		http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+	<flow name="files-move-flow"
+		doc:name="files-move-flow"
+		doc:description="Mueve un CSV de /orders/pending a /orders/processed o /orders/error sin sobrescribir">
+		<logger level="INFO"
+			message="#[output application/java --- 'INIT - Move file SAPI, fileName: ' ++ attributes.uriParams.fileName ++ ' correlationId: ' ++ correlationId]"
+			doc:name="logger-move-file-start"
+			doc:description="Registra el inicio del movimiento con el nombre del archivo"/>
+		<ee:transform doc:name="transform-move-variables"
+			doc:description="Guarda el nombre del archivo y la carpeta destino porque sftp:move reemplaza atributos y payload">
+			<ee:message doc:description="Sin cambios al payload; solo se calculan las variables fileName y targetFolder"/>
+			<ee:variables>
+				<ee:set-variable variableName="fileName"
+					doc:description="Nombre del archivo recibido en la URL"><![CDATA[%dw 2.0
+output application/java
+---
+attributes.uriParams.fileName]]></ee:set-variable>
+				<ee:set-variable variableName="targetFolder"
+					doc:description="Carpeta destino indicada en el cuerpo: processed o error"><![CDATA[%dw 2.0
+output application/java
+---
+payload.target]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+		<sftp:move config-ref="sftp-orders-config" sourcePath="#[p('sftp.baseDir') ++ '/pending/' ++ vars.fileName]" targetPath="#[p('sftp.baseDir') ++ '/' ++ vars.targetFolder]" overwrite="false"
+			doc:name="sftp-move-order-file"
+			doc:description="Mueve el archivo de pending a la carpeta destino sin sobrescribir; FILE_DOESNT_EXIST si no está, FILE_ALREADY_EXISTS si ya está en el destino"/>
+		<sftp:list config-ref="sftp-orders-config" directoryPath="#[p('sftp.baseDir') ++ '/' ++ vars.targetFolder]"
+			doc:name="sftp-list-moved-file"
+			doc:description="Consulta el archivo ya movido para devolver su tamaño y fecha reales">
+			<sftp:matcher filenamePattern="#[vars.fileName]" doc:description="Filtra el archivo movido por su nombre exacto"/>
+		</sftp:list>
+		<ee:transform doc:name="transform-moved-file-response"
+			doc:description="Responde el FileInfo del archivo en su nueva carpeta">
+			<ee:message doc:description="Define el payload de la respuesta con el archivo movido">
+				<ee:set-payload resource="dataweave/mapping-moved-file-response.dwl"
+					doc:description="Arma el FileInfo con la carpeta destino y los datos del archivo movido"/>
+			</ee:message>
+		</ee:transform>
+		<logger level="INFO"
+			message="#[output application/java --- 'END - Move file SAPI, fileName: ' ++ vars.fileName ++ ' correlationId: ' ++ correlationId]"
+			doc:name="logger-move-file-end"
+			doc:description="Registra el fin del movimiento"/>
+	</flow>
+
+</mule>

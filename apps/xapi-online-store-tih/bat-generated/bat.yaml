@@ -1,0 +1,18 @@
+suite:
+  name: "xapi-online-store-tih BAT (generated from source)"
+files:
+  - file: tests/post-customer-happy-path.dwl
+  - file: tests/post-customer-duplicate-email.dwl
+  - file: tests/post-customer-no-email-no-phone.dwl
+  - file: tests/post-customer-invalid-phone.dwl
+  - file: tests/post-order-happy-path.dwl
+  - file: tests/post-order-customer-not-found.dwl
+  - file: tests/post-order-empty-items.dwl
+  - file: tests/post-order-invalid-body.dwl
+  - file: tests/customers-method-not-allowed.dwl
+  - file: tests/missing-client-headers.dwl
+reporters:
+  - type: HTML
+    outFile: reports/bat-report.html
+  - type: JSON
+    outFile: reports/bat-report.json

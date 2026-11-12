@@ -1,0 +1,277 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:munit="http://www.mulesoft.org/schema/mule/munit"
+	xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/munit http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+		http://www.mulesoft.org/schema/mule/munit-tools http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd">
+
+	<!-- Pruebas de consume-order-registered-subflow (lógica del listener AMQP): sin broker, con ack/reject, papi-customers y MagicBell simulados. -->
+	<munit:config name="consume-order-registered-test.xml"/>
+
+	<!-- Propósito: evento procesado con éxito se confirma. Escenario: cliente con email y MagicBell acepta.
+	     Resultado esperado: un ACK y ningún reject. -->
+	<munit:test name="consume_whenNotificationSent_thenAck">
+		<munit:behavior>
+			<munit-tools:mock-when processor="http:request">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-get-customer"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[{ id: 'c-1', name: 'Ana', email: 'ana.perez@example.com' }]" mediaType="application/java"/>
+					<munit-tools:attributes value="#[{ statusCode: 200 }]"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit-tools:mock-when processor="http:request">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-send-notification"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[{ id: 'bc-1' }]" mediaType="application/java"/>
+					<munit-tools:attributes value="#[{ statusCode: 201 }]"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit-tools:mock-when processor="amqp:ack">
+				<munit-tools:then-return>
+					<munit-tools:payload value="#['ok']" mediaType="application/java"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit:set-event>
+				<munit:payload value="#['{&quot;eventType&quot;:&quot;order.registered&quot;,&quot;orderId&quot;:&quot;o-1&quot;,&quot;customerId&quot;:&quot;c-1&quot;,&quot;total&quot;:2500}']" mediaType="application/json"/>
+				<munit:variables>
+					<munit:variable key="ackId" value="#[42]"/>
+				</munit:variables>
+			</munit:set-event>
+		</munit:behavior>
+		<munit:execution>
+			<flow-ref name="consume-order-registered-subflow"/>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:verify-call processor="amqp:ack" times="1"/>
+			<munit-tools:verify-call processor="amqp:reject" times="0"/>
+			<munit-tools:verify-call processor="http:request" times="1">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-send-notification"/>
+				</munit-tools:with-attributes>
+			</munit-tools:verify-call>
+		</munit:validation>
+	</munit:test>
+
+	<!-- Propósito: cliente sin email se confirma sin enviar. Escenario: papi-customers devuelve solo teléfono.
+	     Resultado esperado: un ACK y MagicBell no se llama. -->
+	<munit:test name="consume_whenCustomerHasNoEmail_thenAckWithoutSending">
+		<munit:behavior>
+			<munit-tools:mock-when processor="http:request">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-get-customer"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[{ id: 'c-1', name: 'Ana', phone: '+5215512345678' }]" mediaType="application/java"/>
+					<munit-tools:attributes value="#[{ statusCode: 200 }]"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit-tools:mock-when processor="amqp:ack">
+				<munit-tools:then-return>
+					<munit-tools:payload value="#['ok']" mediaType="application/java"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit:set-event>
+				<munit:payload value="#['{&quot;eventType&quot;:&quot;order.registered&quot;,&quot;orderId&quot;:&quot;o-2&quot;,&quot;customerId&quot;:&quot;c-1&quot;,&quot;total&quot;:10}']" mediaType="application/json"/>
+				<munit:variables>
+					<munit:variable key="ackId" value="#[43]"/>
+				</munit:variables>
+			</munit:set-event>
+		</munit:behavior>
+		<munit:execution>
+			<flow-ref name="consume-order-registered-subflow"/>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:verify-call processor="amqp:ack" times="1"/>
+			<munit-tools:verify-call processor="amqp:reject" times="0"/>
+			<munit-tools:verify-call processor="http:request" times="0">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-send-notification"/>
+				</munit-tools:with-attributes>
+			</munit-tools:verify-call>
+		</munit:validation>
+	</munit:test>
+
+	<!-- Propósito: un error permanente no se reintenta. Escenario: papi-customers responde 404.
+	     Resultado esperado: reject sin requeue, sin ACK y una sola consulta del cliente. -->
+	<munit:test name="consume_whenCustomerNotFound_thenRejectWithoutRetry">
+		<munit:behavior>
+			<munit-tools:mock-when processor="http:request">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-get-customer"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[{ code: 'CUSTOMER_NOT_FOUND' }]" mediaType="application/java"/>
+					<munit-tools:attributes value="#[{ statusCode: 404 }]"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit-tools:mock-when processor="amqp:reject">
+				<munit-tools:then-return>
+					<munit-tools:payload value="#['ok']" mediaType="application/java"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit:set-event>
+				<munit:payload value="#['{&quot;eventType&quot;:&quot;order.registered&quot;,&quot;orderId&quot;:&quot;o-3&quot;,&quot;customerId&quot;:&quot;c-x&quot;,&quot;total&quot;:10}']" mediaType="application/json"/>
+				<munit:variables>
+					<munit:variable key="ackId" value="#[44]"/>
+				</munit:variables>
+			</munit:set-event>
+		</munit:behavior>
+		<munit:execution>
+			<flow-ref name="consume-order-registered-subflow"/>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:verify-call processor="amqp:reject" times="1">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="Reject (DLQ)"/>
+				</munit-tools:with-attributes>
+			</munit-tools:verify-call>
+			<munit-tools:verify-call processor="amqp:ack" times="0"/>
+			<munit-tools:verify-call processor="http:request" times="1">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-get-customer"/>
+				</munit-tools:with-attributes>
+			</munit-tools:verify-call>
+		</munit:validation>
+	</munit:test>
+
+	<!-- Propósito: un error transitorio se reintenta y luego va a la DLQ. Escenario: MagicBell responde 503 siempre.
+	     Resultado esperado: 3 intentos (1 + 2 reintentos), reject sin requeue y sin ACK. -->
+	<munit:test name="consume_whenMagicBellKeepsFailing_thenRetryAndRejectToDlq">
+		<munit:behavior>
+			<munit-tools:mock-when processor="http:request">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-get-customer"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[{ id: 'c-1', name: 'Ana', email: 'ana.perez@example.com' }]" mediaType="application/java"/>
+					<munit-tools:attributes value="#[{ statusCode: 200 }]"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit-tools:mock-when processor="http:request">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-send-notification"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:error typeId="HTTP:SERVICE_UNAVAILABLE"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit-tools:mock-when processor="amqp:reject">
+				<munit-tools:then-return>
+					<munit-tools:payload value="#['ok']" mediaType="application/java"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit:set-event>
+				<munit:payload value="#['{&quot;eventType&quot;:&quot;order.registered&quot;,&quot;orderId&quot;:&quot;o-4&quot;,&quot;customerId&quot;:&quot;c-1&quot;,&quot;total&quot;:10}']" mediaType="application/json"/>
+				<munit:variables>
+					<munit:variable key="ackId" value="#[45]"/>
+				</munit:variables>
+			</munit:set-event>
+		</munit:behavior>
+		<munit:execution>
+			<flow-ref name="consume-order-registered-subflow"/>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:verify-call processor="http:request" times="3">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-send-notification"/>
+				</munit-tools:with-attributes>
+			</munit-tools:verify-call>
+			<munit-tools:verify-call processor="amqp:reject" times="1">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="Reject (DLQ) after error"/>
+				</munit-tools:with-attributes>
+			</munit-tools:verify-call>
+			<munit-tools:verify-call processor="amqp:ack" times="0"/>
+		</munit:validation>
+	</munit:test>
+
+	<!-- Propósito: un mensaje ilegible no se pierde ni se reintenta. Escenario: el cuerpo no es JSON.
+	     Resultado esperado: reject sin requeue (DLQ) y ningún llamado HTTP. -->
+	<munit:test name="consume_whenBodyIsNotJson_thenRejectToDlq">
+		<munit:behavior>
+			<munit-tools:mock-when processor="amqp:reject">
+				<munit-tools:then-return>
+					<munit-tools:payload value="#['ok']" mediaType="application/java"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit:set-event>
+				<munit:payload value="#['esto no es json']" mediaType="application/json"/>
+				<munit:variables>
+					<munit:variable key="ackId" value="#[46]"/>
+				</munit:variables>
+			</munit:set-event>
+		</munit:behavior>
+		<munit:execution>
+			<flow-ref name="consume-order-registered-subflow"/>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:verify-call processor="amqp:reject" times="1">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="Reject (DLQ) after error"/>
+				</munit-tools:with-attributes>
+			</munit-tools:verify-call>
+			<munit-tools:verify-call processor="http:request" times="0"/>
+		</munit:validation>
+	</munit:test>
+
+	<!-- Propósito: un 422 de MagicBell es permanente. Escenario: MagicBell responde 422.
+	     Resultado esperado: reject sin requeue, sin ACK y un solo intento de envío (sin reintentos). -->
+	<munit:test name="consume_whenMagicBellRejectsWith422_thenRejectWithoutRetry">
+		<munit:behavior>
+			<munit-tools:mock-when processor="http:request">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-get-customer"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[{ id: 'c-1', name: 'Ana', email: 'ana.perez@example.com' }]" mediaType="application/java"/>
+					<munit-tools:attributes value="#[{ statusCode: 200 }]"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit-tools:mock-when processor="http:request">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-send-notification"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[{ errors: [] }]" mediaType="application/java"/>
+					<munit-tools:attributes value="#[{ statusCode: 422 }]"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit-tools:mock-when processor="amqp:reject">
+				<munit-tools:then-return>
+					<munit-tools:payload value="#['ok']" mediaType="application/java"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit:set-event>
+				<munit:payload value="#['{&quot;eventType&quot;:&quot;order.registered&quot;,&quot;orderId&quot;:&quot;o-6&quot;,&quot;customerId&quot;:&quot;c-1&quot;,&quot;total&quot;:10}']" mediaType="application/json"/>
+				<munit:variables>
+					<munit:variable key="ackId" value="#[47]"/>
+				</munit:variables>
+			</munit:set-event>
+		</munit:behavior>
+		<munit:execution>
+			<flow-ref name="consume-order-registered-subflow"/>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:verify-call processor="amqp:reject" times="1">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="Reject (DLQ)"/>
+				</munit-tools:with-attributes>
+			</munit-tools:verify-call>
+			<munit-tools:verify-call processor="amqp:ack" times="0"/>
+			<munit-tools:verify-call processor="http:request" times="1">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-send-notification"/>
+				</munit-tools:with-attributes>
+			</munit-tools:verify-call>
+		</munit:validation>
+	</munit:test>
+
+</mule>

@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flujo de negocio TIH</title>
+<style>
+:root{--bg:#f6f7f9;--fg:#1f2430;--muted:#5b6475;--card:#fff;--line:#4a5262;
+--lane-a:#eef4fd;--lane-a-s:#6c8ebf;--lane-b:#eff7ee;--lane-b-s:#82b366;--lane-c:#fff4e6;--lane-c-s:#d79b00;
+--step:#fff;--step-s:#667085;--dec:#fff2cc;--dec-s:#d6b656;--ok:#d5e8d4;--ok-s:#82b366;--err:#f8cecc;--err-s:#b85450;--warn:#ffe6cc;--warn-s:#d79b00;--mq:#ff6600;--mq-s:#b34700;--svgfg:#1f2430}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#14171d;--fg:#e6e9ef;--muted:#9aa3b5;--card:#1c2028;--line:#aab2c3;
+--lane-a:#1a2433;--lane-b:#18261a;--lane-c:#2b2114;--step:#262b35;--step-s:#8b93a5;--dec:#4a4020;--ok:#243d27;--err:#4a2523;--warn:#4a3418;--svgfg:#e6e9ef}}
+:root[data-theme="dark"]{--bg:#14171d;--fg:#e6e9ef;--muted:#9aa3b5;--card:#1c2028;--line:#aab2c3;
+--lane-a:#1a2433;--lane-b:#18261a;--lane-c:#2b2114;--step:#262b35;--step-s:#8b93a5;--dec:#4a4020;--ok:#243d27;--err:#4a2523;--warn:#4a3418;--svgfg:#e6e9ef}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;line-height:1.5}
+.wrap{max-width:1200px;margin:0 auto;padding:24px 16px 48px}
+h1{font-size:1.5rem;margin:0 0 4px}
+p.sub{color:var(--muted);margin:0 0 16px}
+.legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:0 0 16px;padding:0;list-style:none;font-size:.85rem}
+.legend li{display:flex;align-items:center;gap:6px}
+.sw{width:16px;height:16px;border:1.5px solid;border-radius:4px;display:inline-block}
+.board{background:var(--card);border:1px solid color-mix(in srgb,var(--fg) 15%,transparent);border-radius:12px;padding:12px;overflow:auto}
+svg{display:block;min-width:1100px;width:100%;height:auto;font-family:inherit}
+svg text{fill:var(--svgfg);font-size:12px}
+.lane{stroke-width:1.5}.la{fill:var(--lane-a);stroke:var(--lane-a-s)}.lb{fill:var(--lane-b);stroke:var(--lane-b-s)}.lc{fill:var(--lane-c);stroke:var(--lane-c-s)}
+.lane-title{font-weight:700;font-size:14px!important}
+.n-step{fill:var(--step);stroke:var(--step-s);stroke-width:1.3}
+.n-dec{fill:var(--dec);stroke:var(--dec-s);stroke-width:1.3}
+.n-start,.n-end{fill:var(--ok);stroke:var(--ok-s);stroke-width:1.6}
+.n-err{fill:var(--err);stroke:var(--err-s);stroke-width:1.3}
+.n-warn{fill:var(--warn);stroke:var(--warn-s);stroke-width:1.3}
+.n-mq{fill:var(--mq);stroke:var(--mq-s);stroke-width:1.3}
+svg .n-mq ~ text{fill:#fff}
+.edge{fill:none;stroke:var(--line);stroke-width:1.4}
+.dash-green{stroke:var(--ok-s);stroke-dasharray:6 4}.dash-orange{stroke:var(--mq);stroke-dasharray:6 4}
+.arrowhead{fill:var(--line)}
+.elabel{font-size:11px!important;font-weight:600}
+.note{color:var(--muted);font-size:.85rem;margin-top:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>Flujo de negocio: registro de un pedido</h1>
+<p class="sub">Proyecto TIH MuleSoft · de la tienda en línea hasta el correo al cliente, en tres etapas.</p>
+<ul class="legend">
+<li><span class="sw" style="background:var(--ok);border-color:var(--ok-s)"></span>Inicio / fin</li>
+<li><span class="sw" style="background:var(--step);border-color:var(--step-s)"></span>Paso</li>
+<li><span class="sw" style="background:var(--dec);border-color:var(--dec-s)"></span>Decisión</li>
+<li><span class="sw" style="background:var(--warn);border-color:var(--warn-s)"></span>Omitido / reintento</li>
+<li><span class="sw" style="background:var(--err);border-color:var(--err-s)"></span>Error</li>
+<li><span class="sw" style="background:var(--mq);border-color:var(--mq-s)"></span>RabbitMQ</li>
+</ul>
+<div class="board">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1780 1700" role="img" aria-label="Diagrama de flujo del proceso de negocio de pedidos TIH">
+<defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="arrowhead"/></marker></defs>
+<g><rect class="lane la" x="30" y="20" width="560" height="790" rx="10"/><text class="lane-title" x="46" y="44">1. Recepción del pedido (síncrono)</text></g>
+<g><rect class="lane lb" x="610" y="20" width="560" height="1650" rx="10"/><text class="lane-title" x="626" y="44">2. Procesamiento del pedido (scheduler / trigger manual)</text></g>
+<g><rect class="lane lc" x="1190" y="20" width="560" height="880" rx="10"/><text class="lane-title" x="1206" y="44">3. Notificación al cliente (asíncrono)</text></g>
+<path class="edge " d="M200,130 L200,160" marker-end="url(#arr)"/>
+<path class="edge " d="M200,210 L200,250" marker-end="url(#arr)"/>
+<path class="edge " d="M310,290 L370,290" marker-end="url(#arr)"/><text class="elabel" x="316" y="285">Sí</text>
+<path class="edge " d="M200,330 L200,370" marker-end="url(#arr)"/><text class="elabel" x="208" y="344">No</text>
+<path class="edge " d="M200,420 L200,460" marker-end="url(#arr)"/>
+<path class="edge " d="M310,500 L370,500" marker-end="url(#arr)"/><text class="elabel" x="316" y="495">No</text>
+<path class="edge " d="M200,540 L200,580" marker-end="url(#arr)"/><text class="elabel" x="208" y="554">Sí</text>
+<path class="edge " d="M200,640 L200,690" marker-end="url(#arr)"/>
+<path class="edge " d="M750,130 L750,150" marker-end="url(#arr)"/>
+<path class="edge " d="M860,190 L885,190 L885,195 L910,195" marker-end="url(#arr)"/><text class="elabel" x="866" y="185">Sí</text>
+<path class="edge " d="M750,230 L750,260" marker-end="url(#arr)"/><text class="elabel" x="758" y="244">No</text>
+<path class="edge " d="M750,310 L750,350" marker-end="url(#arr)"/>
+<path class="edge " d="M750,390 L750,420" marker-end="url(#arr)"/>
+<path class="edge " d="M860,460 L885,460 L885,875 L910,875" marker-end="url(#arr)"/><text class="elabel" x="866" y="455">No</text>
+<path class="edge " d="M750,500 L750,540" marker-end="url(#arr)"/><text class="elabel" x="758" y="514">Sí</text>
+<path class="edge " d="M860,580 L885,580 L885,590 L910,590" marker-end="url(#arr)"/><text class="elabel" x="866" y="575">Sí</text>
+<path class="edge " d="M750,620 L750,660" marker-end="url(#arr)"/><text class="elabel" x="758" y="634">No</text>
+<path class="edge " d="M750,700 L750,730" marker-end="url(#arr)"/>
+<path class="edge " d="M860,765 L885,765 L885,875 L910,875" marker-end="url(#arr)"/><text class="elabel" x="866" y="760">No</text>
+<path class="edge " d="M750,800 L750,840" marker-end="url(#arr)"/><text class="elabel" x="758" y="814">Sí</text>
+<path class="edge " d="M750,890 L750,930" marker-end="url(#arr)"/>
+<path class="edge " d="M860,970 L885,970 L885,875 L910,875" marker-end="url(#arr)"/><text class="elabel" x="866" y="965">No</text>
+<path class="edge " d="M750,1010 L750,1050" marker-end="url(#arr)"/><text class="elabel" x="758" y="1024">Sí</text>
+<path class="edge " d="M750,1120 L750,1150" marker-end="url(#arr)"/>
+<path class="edge " d="M860,1190 L885,1190 L885,875 L910,875" marker-end="url(#arr)"/><text class="elabel" x="866" y="1185">No</text>
+<path class="edge " d="M750,1230 L750,1270" marker-end="url(#arr)"/><text class="elabel" x="758" y="1244">Sí</text>
+<path class="edge " d="M750,1320 L750,1360" marker-end="url(#arr)"/>
+<path class="edge " d="M860,1400 L1125,1400 L1125,590 L1100,590" marker-end="url(#arr)"/><text class="elabel" x="866" y="1395">Sí</text>
+<path class="edge " d="M750,1440 L750,1480" marker-end="url(#arr)"/><text class="elabel" x="758" y="1454">No</text>
+<path class="edge " d="M750,1540 L750,1580" marker-end="url(#arr)"/>
+<path class="edge dash-green" d="M310,610 L600,610 L600,285 L640,285" marker-end="url(#arr)"/><text class="elabel" x="316" y="605">archivo en /pending</text>
+<path class="edge " d="M1330,140 L1330,170" marker-end="url(#arr)"/>
+<path class="edge " d="M1330,220 L1330,260" marker-end="url(#arr)"/>
+<path class="edge " d="M1330,310 L1330,350" marker-end="url(#arr)"/>
+<path class="edge " d="M1440,390 L1470,390 L1470,395 L1500,395" marker-end="url(#arr)"/><text class="elabel" x="1446" y="385">No</text>
+<path class="edge " d="M1330,430 L1330,470" marker-end="url(#arr)"/><text class="elabel" x="1338" y="444">Sí</text>
+<path class="edge " d="M1440,510 L1470,510 L1470,515 L1500,515" marker-end="url(#arr)"/><text class="elabel" x="1446" y="505">No</text>
+<path class="edge " d="M1330,550 L1330,590" marker-end="url(#arr)"/><text class="elabel" x="1338" y="564">Sí</text>
+<path class="edge " d="M1330,650 L1330,680" marker-end="url(#arr)"/>
+<path class="edge " d="M1440,720 L1470,720 L1470,395 L1500,395" marker-end="url(#arr)"/><text class="elabel" x="1446" y="715">Rechaza (permanente)</text>
+<path class="edge " d="M1440,720 L1500,720" marker-end="url(#arr)"/><text class="elabel" x="1446" y="715">Falla temporal</text>
+<path class="edge " d="M1330,760 L1330,800" marker-end="url(#arr)"/><text class="elabel" x="1338" y="774">Sí</text>
+<path class="edge dash-orange" d="M860,1510 L1180,1510 L1180,105 L1220,105" marker-end="url(#arr)"/><text class="elabel" x="866" y="1505">order.registered</text>
+<g><ellipse class="n-start" cx="200" cy="100" rx="110" ry="30"/><text x="200" y="97" text-anchor="middle" ><tspan x="200" dy="0">Tienda en línea envía el pedido</tspan><tspan x="200" dy="14">POST /online-store/orders</tspan></text></g>
+<g><rect class="n-step" x="90" y="160" width="220" height="50" rx="9"/><text x="200" y="182" text-anchor="middle" ><tspan x="200" dy="0">xapi-online-store valida y</tspan><tspan x="200" dy="14">reenvía a papi-orders</tspan></text></g>
+<g><polygon class="n-dec" points="200,250 310,290 200,330 90,290"/><text x="200" y="287" text-anchor="middle" ><tspan x="200" dy="0">¿Hay ítems</tspan><tspan x="200" dy="14">duplicados?</tspan></text></g>
+<g><rect class="n-err" x="370" y="265" width="190" height="50" rx="9"/><text x="465" y="294" text-anchor="middle" ><tspan x="465" dy="0">422 – Ítems duplicados</tspan></text></g>
+<g><rect class="n-step" x="90" y="370" width="220" height="50" rx="9"/><text x="200" y="392" text-anchor="middle" ><tspan x="200" dy="0">Consulta el cliente</tspan><tspan x="200" dy="14">(papi-customers)</tspan></text></g>
+<g><polygon class="n-dec" points="200,460 310,500 200,540 90,500"/><text x="200" y="497" text-anchor="middle" ><tspan x="200" dy="0">¿El cliente</tspan><tspan x="200" dy="14">existe?</tspan></text></g>
+<g><rect class="n-err" x="370" y="475" width="190" height="50" rx="9"/><text x="465" y="504" text-anchor="middle" ><tspan x="465" dy="0">404 – Cliente no encontrado</tspan></text></g>
+<g><rect class="n-step" x="90" y="580" width="220" height="60" rx="9"/><text x="200" y="607" text-anchor="middle" ><tspan x="200" dy="0">Genera el CSV del pedido y lo</tspan><tspan x="200" dy="14">guarda en SFTP /orders/pending</tspan></text></g>
+<g><ellipse class="n-end" cx="200" cy="720" rx="110" ry="30"/><text x="200" y="717" text-anchor="middle" ><tspan x="200" dy="0">Responde: pedido recibido</tspan><tspan x="200" dy="14">(queda pendiente de procesar)</tspan></text></g>
+<g><ellipse class="n-start" cx="750" cy="100" rx="110" ry="30"/><text x="750" y="97" text-anchor="middle" ><tspan x="750" dy="0">Scheduler (o trigger manual)</tspan><tspan x="750" dy="14">inicia el ciclo</tspan></text></g>
+<g><polygon class="n-dec" points="750,150 860,190 750,230 640,190"/><text x="750" y="187" text-anchor="middle" ><tspan x="750" dy="0">¿Ya hay un ciclo</tspan><tspan x="750" dy="14">en ejecución?</tspan></text></g>
+<g><rect class="n-warn" x="910" y="165" width="190" height="60" rx="9"/><text x="1005" y="192" text-anchor="middle" ><tspan x="1005" dy="0">Omite el ciclo</tspan><tspan x="1005" dy="14">(409 si fue manual)</tspan></text></g>
+<g><rect class="n-step" x="640" y="260" width="220" height="50" rx="9"/><text x="750" y="282" text-anchor="middle" ><tspan x="750" dy="0">Lista los archivos de</tspan><tspan x="750" dy="14">SFTP /orders/pending</tspan></text></g>
+<g><rect class="n-step" x="640" y="350" width="220" height="40" rx="9"/><text x="750" y="374" text-anchor="middle" ><tspan x="750" dy="0">Por cada archivo pendiente</tspan></text></g>
+<g><polygon class="n-dec" points="750,420 860,460 750,500 640,460"/><text x="750" y="457" text-anchor="middle" ><tspan x="750" dy="0">¿Nombre de archivo</tspan><tspan x="750" dy="14">válido?</tspan></text></g>
+<g><polygon class="n-dec" points="750,540 860,580 750,620 640,580"/><text x="750" y="577" text-anchor="middle" ><tspan x="750" dy="0">¿El pedido ya está</tspan><tspan x="750" dy="14">registrado en Oracle?</tspan></text></g>
+<g><rect class="n-step" x="640" y="660" width="220" height="40" rx="9"/><text x="750" y="684" text-anchor="middle" ><tspan x="750" dy="0">Lee y parsea el CSV</tspan></text></g>
+<g><polygon class="n-dec" points="750,730 860,765 750,800 640,765"/><text x="750" y="769" text-anchor="middle" ><tspan x="750" dy="0">¿CSV válido?</tspan></text></g>
+<g><rect class="n-step" x="640" y="840" width="220" height="50" rx="9"/><text x="750" y="862" text-anchor="middle" ><tspan x="750" dy="0">Consulta el inventario</tspan><tspan x="750" dy="14">(sapi-oracle-core)</tspan></text></g>
+<g><polygon class="n-dec" points="750,930 860,970 750,1010 640,970"/><text x="750" y="967" text-anchor="middle" ><tspan x="750" dy="0">¿Todos los ítems</tspan><tspan x="750" dy="14">existen?</tspan></text></g>
+<g><rect class="n-step" x="640" y="1050" width="220" height="70" rx="9"/><text x="750" y="1075" text-anchor="middle" ><tspan x="750" dy="0">Por cada ítem consulta el precio</tspan><tspan x="750" dy="14">al proveedor (FAK / ESC / BOR)</tspan><tspan x="750" dy="14">vía sapi-price-providers</tspan></text></g>
+<g><polygon class="n-dec" points="750,1150 860,1190 750,1230 640,1190"/><text x="750" y="1187" text-anchor="middle" ><tspan x="750" dy="0">¿Precio disponible y</tspan><tspan x="750" dy="14">proveedor soportado?</tspan></text></g>
+<g><rect class="n-step" x="640" y="1270" width="220" height="50" rx="9"/><text x="750" y="1292" text-anchor="middle" ><tspan x="750" dy="0">Registra el pedido en Oracle</tspan><tspan x="750" dy="14">(sapi-oracle-core)</tspan></text></g>
+<g><polygon class="n-dec" points="750,1360 860,1400 750,1440 640,1400"/><text x="750" y="1397" text-anchor="middle" ><tspan x="750" dy="0">¿Conflicto: el pedido</tspan><tspan x="750" dy="14">ya existe?</tspan></text></g>
+<g><rect class="n-step" x="640" y="1480" width="220" height="60" rx="9"/><text x="750" y="1507" text-anchor="middle" ><tspan x="750" dy="0">Publica el evento order.registered</tspan><tspan x="750" dy="14">en RabbitMQ (orders.events)</tspan></text></g>
+<g><ellipse class="n-end" cx="750" cy="1610" rx="110" ry="30"/><text x="750" y="1607" text-anchor="middle" ><tspan x="750" dy="0">Mueve el archivo a</tspan><tspan x="750" dy="14">SFTP /orders/processed</tspan></text></g>
+<g><rect class="n-warn" x="910" y="560" width="190" height="60" rx="9"/><text x="1005" y="587" text-anchor="middle" ><tspan x="1005" dy="0">Ya registrado:</tspan><tspan x="1005" dy="14">mueve el archivo a /processed</tspan></text></g>
+<g><rect class="n-err" x="910" y="840" width="190" height="70" rx="9"/><text x="1005" y="865" text-anchor="middle" ><tspan x="1005" dy="0">Error de datos:</tspan><tspan x="1005" dy="14">mueve el archivo a</tspan><tspan x="1005" dy="14">SFTP /orders/error</tspan></text></g>
+<g><rect class="n-warn" x="910" y="1100" width="190" height="80" rx="9"/><text x="1005" y="1130" text-anchor="middle" ><tspan x="1005" dy="0">Error transitorio (backend caído):</tspan><tspan x="1005" dy="14">el archivo se queda en /pending</tspan><tspan x="1005" dy="14">y se reintenta en el siguiente ciclo</tspan></text></g>
+<g><rect class="n-mq" x="1220" y="70" width="220" height="70" rx="9"/><text x="1330" y="102" text-anchor="middle" ><tspan x="1330" dy="0">RabbitMQ entrega el evento</tspan><tspan x="1330" dy="14">(orders.registered.q)</tspan></text></g>
+<g><rect class="n-step" x="1220" y="170" width="220" height="50" rx="9"/><text x="1330" y="192" text-anchor="middle" ><tspan x="1330" dy="0">papi-notifications consume</tspan><tspan x="1330" dy="14">el mensaje (ACK manual)</tspan></text></g>
+<g><rect class="n-step" x="1220" y="260" width="220" height="50" rx="9"/><text x="1330" y="282" text-anchor="middle" ><tspan x="1330" dy="0">Consulta el cliente</tspan><tspan x="1330" dy="14">(papi-customers)</tspan></text></g>
+<g><polygon class="n-dec" points="1330,350 1440,390 1330,430 1220,390"/><text x="1330" y="387" text-anchor="middle" ><tspan x="1330" dy="0">¿El cliente</tspan><tspan x="1330" dy="14">existe?</tspan></text></g>
+<g><polygon class="n-dec" points="1330,470 1440,510 1330,550 1220,510"/><text x="1330" y="507" text-anchor="middle" ><tspan x="1330" dy="0">¿El cliente tiene</tspan><tspan x="1330" dy="14">email?</tspan></text></g>
+<g><rect class="n-step" x="1220" y="590" width="220" height="60" rx="9"/><text x="1330" y="617" text-anchor="middle" ><tspan x="1330" dy="0">Arma el broadcast y hace</tspan><tspan x="1330" dy="14">POST /broadcasts a MagicBell</tspan></text></g>
+<g><polygon class="n-dec" points="1330,680 1440,720 1330,760 1220,720"/><text x="1330" y="717" text-anchor="middle" ><tspan x="1330" dy="0">¿MagicBell acepta</tspan><tspan x="1330" dy="14">la solicitud?</tspan></text></g>
+<g><ellipse class="n-end" cx="1330" cy="835" rx="110" ry="35"/><text x="1330" y="832" text-anchor="middle" ><tspan x="1330" dy="0">MagicBell entrega el correo por el</tspan><tspan x="1330" dy="14">canal email (SMTP) y se hace ACK</tspan></text></g>
+<g><rect class="n-warn" x="1500" y="485" width="190" height="60" rx="9"/><text x="1595" y="512" text-anchor="middle" ><tspan x="1595" dy="0">Omite el envío</tspan><tspan x="1595" dy="14">(SKIPPED_NO_EMAIL) y ACK</tspan></text></g>
+<g><rect class="n-err" x="1500" y="360" width="190" height="70" rx="9"/><text x="1595" y="385" text-anchor="middle" ><tspan x="1595" dy="0">Error permanente:</tspan><tspan x="1595" dy="14">mensaje a DLQ</tspan><tspan x="1595" dy="14">orders.registered.dlq</tspan></text></g>
+<g><rect class="n-warn" x="1500" y="690" width="190" height="60" rx="9"/><text x="1595" y="717" text-anchor="middle" ><tspan x="1595" dy="0">Error transitorio: reintenta</tspan><tspan x="1595" dy="14">antes de enviar a la DLQ</tspan></text></g>
+</svg>
+</div>
+<p class="note">Las flechas punteadas unen las etapas: el archivo en SFTP /orders/pending (verde) y el evento order.registered en RabbitMQ (naranja).</p>
+</div>
+</body>
+</html>

@@ -1,0 +1,197 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:munit="http://www.mulesoft.org/schema/mule/munit"
+	xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+		http://www.mulesoft.org/schema/mule/munit http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+		http://www.mulesoft.org/schema/mule/munit-tools http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd">
+
+	<!-- Pruebas HTTP: listener real en el puerto 8084 (debe estar libre), APIs consumidas simuladas. -->
+	<munit:config name="papi-notifications-tih-main-test.xml"/>
+
+	<http:request-config name="test-api-client" doc:name="HTTP Request configuration">
+		<http:request-connection host="localhost" port="8084"/>
+	</http:request-config>
+
+	<!-- El calentamiento ejecuta el flujo de verdad: se simula papi-customers para que NO salga ninguna llamada real. -->
+	<munit:before-suite name="main-warm-up">
+		<munit-tools:mock-when processor="http:request">
+			<munit-tools:with-attributes>
+				<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-get-customer"/>
+			</munit-tools:with-attributes>
+			<munit-tools:then-return>
+				<munit-tools:payload value="#[{ id: 'warm-up' }]" mediaType="application/java"/>
+				<munit-tools:attributes value="#[{ statusCode: 200 }]"/>
+			</munit-tools:then-return>
+		</munit-tools:mock-when>
+		<try><flow-ref name="post:\orders-registered:application\json:papi-notifications-tih-config"/><error-handler><on-error-continue/></error-handler></try>
+	</munit:before-suite>
+
+	<flow name="test-http-post-event-flow">
+		<http:request method="POST" config-ref="test-api-client" path="/api/v1/notifications/orders-registered">
+			<http:body>#[vars.testBody]</http:body>
+			<http:headers><![CDATA[#[{ client_id: 'test-id', client_secret: 'test-secret', 'Content-Type': 'application/json' }]]]></http:headers>
+			<http:response-validator>
+				<http:success-status-code-validator values="0..599"/>
+			</http:response-validator>
+		</http:request>
+	</flow>
+
+	<!-- Propósito: reenvío manual responde 200 SENT. Escenario: evento válido, cliente con email, MagicBell acepta. -->
+	<munit:test name="apiPostOrdersRegistered_whenEventIsValid_thenReturn200Sent">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="papi-notifications-tih-main"/>
+		</munit:enable-flow-sources>
+		<munit:behavior>
+			<munit-tools:mock-when processor="http:request">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-get-customer"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[{ id: '3f2b8c1e-7a4d-4e5b-9c0a-1d2e3f4a5b6c', name: 'Ana', email: 'ana.perez@example.com' }]" mediaType="application/java"/>
+					<munit-tools:attributes value="#[{ statusCode: 200 }]"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit-tools:mock-when processor="http:request">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-send-notification"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[{ id: 'bc-1' }]" mediaType="application/java"/>
+					<munit-tools:attributes value="#[{ statusCode: 201 }]"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<set-variable variableName="testBody" value="#[output application/json --- { eventType: 'order.registered', orderId: '9d8c7b6a-5f4e-4d3c-8b2a-1f0e9d8c7b6a', customerId: '3f2b8c1e-7a4d-4e5b-9c0a-1d2e3f4a5b6c', items: [{ itemId: 'c1a2b3c4-d5e6-4789-a012-3456789abc01', quantity: 2, price: 1250 }], total: 2500, createdAt: '2026-10-07T16:40:00Z' }]"/>
+		</munit:behavior>
+		<munit:execution>
+			<flow-ref name="test-http-post-event-flow"/>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(200)]"/>
+			<munit-tools:assert-that expression="#[payload.status]" is="#[MunitTools::equalTo('SENT')]"/>
+			<munit-tools:assert-that expression="#[payload.orderId]" is="#[MunitTools::equalTo('9d8c7b6a-5f4e-4d3c-8b2a-1f0e9d8c7b6a')]"/>
+		</munit:validation>
+	</munit:test>
+
+	<!-- Propósito: APIkit rechaza eventos fuera del contrato. Escenario: eventType distinto de order.registered. Resultado esperado: 400. -->
+	<munit:test name="apiPostOrdersRegistered_whenEventTypeInvalid_thenReturn400">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="papi-notifications-tih-main"/>
+		</munit:enable-flow-sources>
+		<munit:behavior>
+			<set-variable variableName="testBody" value="#[output application/json --- { eventType: 'order.cancelled', orderId: '9d8c7b6a-5f4e-4d3c-8b2a-1f0e9d8c7b6a', customerId: '3f2b8c1e-7a4d-4e5b-9c0a-1d2e3f4a5b6c', items: [], total: 1, createdAt: '2026-10-07T16:40:00Z' }]"/>
+		</munit:behavior>
+		<munit:execution>
+			<flow-ref name="test-http-post-event-flow"/>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(400)]"/>
+			<munit-tools:assert-that expression="#[payload.code]" is="#[MunitTools::equalTo('VALIDATION_ERROR')]"/>
+		</munit:validation>
+	</munit:test>
+
+	<!-- Propósito: cliente inexistente responde 404. Escenario: papi-customers responde 404. Resultado esperado: 404 CUSTOMER_NOT_FOUND. -->
+	<munit:test name="apiPostOrdersRegistered_whenCustomerUnknown_thenReturn404">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="papi-notifications-tih-main"/>
+		</munit:enable-flow-sources>
+		<munit:behavior>
+			<munit-tools:mock-when processor="http:request">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-get-customer"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[{ code: 'CUSTOMER_NOT_FOUND' }]" mediaType="application/java"/>
+					<munit-tools:attributes value="#[{ statusCode: 404 }]"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<set-variable variableName="testBody" value="#[output application/json --- { eventType: 'order.registered', orderId: '9d8c7b6a-5f4e-4d3c-8b2a-1f0e9d8c7b6a', customerId: '3f2b8c1e-7a4d-4e5b-9c0a-1d2e3f4a5b6c', items: [], total: 1, createdAt: '2026-10-07T16:40:00Z' }]"/>
+		</munit:behavior>
+		<munit:execution>
+			<flow-ref name="test-http-post-event-flow"/>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(404)]"/>
+			<munit-tools:assert-that expression="#[payload.code]" is="#[MunitTools::equalTo('CUSTOMER_NOT_FOUND')]"/>
+		</munit:validation>
+	</munit:test>
+
+	<!-- Propósito: token de MagicBell inválido responde 502 sin reintento. Escenario: MagicBell responde 401 (HTTP:UNAUTHORIZED).
+	     Resultado esperado: 502, PROVIDER_REJECTED y retryable false. -->
+	<munit:test name="apiPostOrdersRegistered_whenMagicBellRejectsToken_thenReturn502">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="papi-notifications-tih-main"/>
+		</munit:enable-flow-sources>
+		<munit:behavior>
+			<munit-tools:mock-when processor="http:request">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-get-customer"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[{ id: 'c-1', name: 'Ana', email: 'ana.perez@example.com' }]" mediaType="application/java"/>
+					<munit-tools:attributes value="#[{ statusCode: 200 }]"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit-tools:mock-when processor="http:request">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-send-notification"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:error typeId="HTTP:UNAUTHORIZED"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<set-variable variableName="testBody" value="#[output application/json --- { eventType: 'order.registered', orderId: '9d8c7b6a-5f4e-4d3c-8b2a-1f0e9d8c7b6a', customerId: '3f2b8c1e-7a4d-4e5b-9c0a-1d2e3f4a5b6c', items: [], total: 1, createdAt: '2026-10-07T16:40:00Z' }]"/>
+		</munit:behavior>
+		<munit:execution>
+			<flow-ref name="test-http-post-event-flow"/>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(502)]"/>
+			<munit-tools:assert-that expression="#[payload.code]" is="#[MunitTools::equalTo('PROVIDER_REJECTED')]"/>
+			<munit-tools:assert-that expression="#[payload.retryable]" is="#[MunitTools::equalTo(false)]"/>
+		</munit:validation>
+	</munit:test>
+
+	<!-- Propósito: MagicBell caído responde 503 con Retry-After. Escenario: sapi-magicbell responde 503 (HTTP:SERVICE_UNAVAILABLE). -->
+	<munit:test name="apiPostOrdersRegistered_whenMagicBellUnavailable_thenReturn503WithRetryAfter">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="papi-notifications-tih-main"/>
+		</munit:enable-flow-sources>
+		<munit:behavior>
+			<munit-tools:mock-when processor="http:request">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-get-customer"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[{ id: 'c-1', name: 'Ana', email: 'ana.perez@example.com' }]" mediaType="application/java"/>
+					<munit-tools:attributes value="#[{ statusCode: 200 }]"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit-tools:mock-when processor="http:request">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-send-notification"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:error typeId="HTTP:SERVICE_UNAVAILABLE"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<set-variable variableName="testBody" value="#[output application/json --- { eventType: 'order.registered', orderId: '9d8c7b6a-5f4e-4d3c-8b2a-1f0e9d8c7b6a', customerId: '3f2b8c1e-7a4d-4e5b-9c0a-1d2e3f4a5b6c', items: [], total: 1, createdAt: '2026-10-07T16:40:00Z' }]"/>
+		</munit:behavior>
+		<munit:execution>
+			<flow-ref name="test-http-post-event-flow"/>
+			<set-variable variableName="statusCode" value="#[attributes.statusCode]"/>
+			<set-variable variableName="retryAfter" value="#[attributes.headers.'retry-after']"/>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[vars.statusCode]" is="#[MunitTools::equalTo(503)]"/>
+			<munit-tools:assert-that expression="#[payload.code]" is="#[MunitTools::equalTo('SERVICE_UNAVAILABLE')]"/>
+			<munit-tools:assert-that expression="#[vars.retryAfter]" is="#[MunitTools::equalTo('30')]"/>
+		</munit:validation>
+	</munit:test>
+
+</mule>

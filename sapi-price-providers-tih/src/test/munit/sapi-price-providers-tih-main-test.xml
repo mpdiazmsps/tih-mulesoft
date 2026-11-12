@@ -1,0 +1,255 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:munit="http://www.mulesoft.org/schema/mule/munit"
+	xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+		http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+		http://www.mulesoft.org/schema/mule/munit http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+		http://www.mulesoft.org/schema/mule/munit-tools http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd">
+
+	<!-- Pruebas HTTP: listener real en el puerto 8093 (debe estar libre), proveedores simulados. Cubren APIkit,
+	     el catálogo de errores y los headers de la respuesta. -->
+	<munit:config name="sapi-price-providers-tih-main-test.xml"/>
+
+	<http:request-config name="test-api-client" doc:name="HTTP Request configuration">
+		<http:request-connection host="localhost" port="8093"/>
+	</http:request-config>
+
+	<!-- APIkit arma su tabla de rutas con los flujos ya inicializados (MUnit los inicia de forma perezosa). -->
+	<munit:before-suite name="main-warm-up">
+		<try><flow-ref name="get:\providers\(providerAbv)\products\(externalId)\price:sapi-price-providers-tih-config"/><error-handler><on-error-continue/></error-handler></try>
+	</munit:before-suite>
+
+	<flow name="test-http-get-price-flow">
+		<http:request method="GET" config-ref="test-api-client" path="#[vars.testPath]">
+			<http:headers><![CDATA[#[{ client_id: 'test-id', client_secret: 'test-secret' }]]]></http:headers>
+			<http:response-validator>
+				<http:success-status-code-validator values="0..599"/>
+			</http:response-validator>
+		</http:request>
+	</flow>
+
+	<!-- Propósito: GET precio responde 200 con el Price. Escenario: FAK con producto existente. Resultado esperado: 200 y Price. -->
+	<munit:test name="apiGetPrice_whenFakProductExists_thenReturn200">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="sapi-price-providers-tih-main"/>
+		</munit:enable-flow-sources>
+		<munit:behavior>
+			<munit-tools:mock-when processor="http:request">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-fakestore"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[{ id: 1, title: 'Backpack', price: 109.95 }]" mediaType="application/java"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<set-variable variableName="testPath" value="/api/v1/price-providers/providers/FAK/products/1/price"/>
+		</munit:behavior>
+		<munit:execution>
+			<flow-ref name="test-http-get-price-flow"/>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(200)]"/>
+			<munit-tools:assert-that expression="#[payload.providerAbv]" is="#[MunitTools::equalTo('FAK')]"/>
+			<munit-tools:assert-that expression="#[payload.price]" is="#[MunitTools::equalTo(109.95)]"/>
+		</munit:validation>
+	</munit:test>
+
+	<!-- Propósito: artículo desconocido responde 404. Escenario: Escuelajs devuelve 400. Resultado esperado: 404 PRODUCT_NOT_FOUND. -->
+	<munit:test name="apiGetPrice_whenEscUnknownProduct_thenReturn404">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="sapi-price-providers-tih-main"/>
+		</munit:enable-flow-sources>
+		<munit:behavior>
+			<munit-tools:mock-when processor="http:request">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-escuelajs"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:error typeId="HTTP:BAD_REQUEST"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<set-variable variableName="testPath" value="/api/v1/price-providers/providers/ESC/products/9999/price"/>
+		</munit:behavior>
+		<munit:execution>
+			<flow-ref name="test-http-get-price-flow"/>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(404)]"/>
+			<munit-tools:assert-that expression="#[payload.code]" is="#[MunitTools::equalTo('PRODUCT_NOT_FOUND')]"/>
+			<munit-tools:assert-that expression="#[payload.retryable]" is="#[MunitTools::equalTo(false)]"/>
+		</munit:validation>
+	</munit:test>
+
+	<!-- Propósito: proveedor caído responde 503 con Retry-After. Escenario: HTTP:CONNECTIVITY en Fakestore.
+	     Resultado esperado: 503, SERVICE_UNAVAILABLE, retryable y header Retry-After. -->
+	<munit:test name="apiGetPrice_whenProviderUnavailable_thenReturn503WithRetryAfter">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="sapi-price-providers-tih-main"/>
+		</munit:enable-flow-sources>
+		<munit:behavior>
+			<munit-tools:mock-when processor="http:request">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-fakestore"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:error typeId="HTTP:CONNECTIVITY"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<set-variable variableName="testPath" value="/api/v1/price-providers/providers/FAK/products/1/price"/>
+		</munit:behavior>
+		<munit:execution>
+			<flow-ref name="test-http-get-price-flow"/>
+			<set-variable variableName="retryAfter" value="#[attributes.headers.'retry-after']"/>
+			<set-variable variableName="statusCode" value="#[attributes.statusCode]"/>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[vars.statusCode]" is="#[MunitTools::equalTo(503)]"/>
+			<munit-tools:assert-that expression="#[payload.code]" is="#[MunitTools::equalTo('SERVICE_UNAVAILABLE')]"/>
+			<munit-tools:assert-that expression="#[payload.retryable]" is="#[MunitTools::equalTo(true)]"/>
+			<munit-tools:assert-that expression="#[vars.retryAfter]" is="#[MunitTools::equalTo('30')]"/>
+		</munit:validation>
+	</munit:test>
+
+	<!-- Propósito: BOR responde 200 con el Price. Escenario: Borland devuelve el artículo 1. Resultado esperado: 200 y Price canónico. -->
+	<munit:test name="apiGetPrice_whenBorArticleExists_thenReturn200">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="sapi-price-providers-tih-main"/>
+		</munit:enable-flow-sources>
+		<munit:behavior>
+			<munit-tools:mock-when processor="wsc:consume">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="wsc-consume-borland-get-article"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-call flow="mock-bor-article-http-flow"/>
+			</munit-tools:mock-when>
+			<set-variable variableName="testPath" value="/api/v1/price-providers/providers/BOR/products/1/price"/>
+		</munit:behavior>
+		<munit:execution>
+			<flow-ref name="test-http-get-price-flow"/>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(200)]"/>
+			<munit-tools:assert-that expression="#[payload.providerAbv]" is="#[MunitTools::equalTo('BOR')]"/>
+			<munit-tools:assert-that expression="#[payload.name]" is="#[MunitTools::equalTo('Lord of the Rings - Fellowship of the Ring')]"/>
+			<munit-tools:assert-that expression="#[payload.price]" is="#[MunitTools::equalTo(34.99)]"/>
+			<munit-tools:assert-that expression="#[payload.currency]" is="#[MunitTools::equalTo('USD')]"/>
+		</munit:validation>
+	</munit:test>
+
+	<!-- Propósito: BOR con id desconocido responde 404. Escenario: Borland responde sin GetArticleByIdResult. Resultado esperado: 404 PRODUCT_NOT_FOUND. -->
+	<munit:test name="apiGetPrice_whenBorArticleUnknown_thenReturn404">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="sapi-price-providers-tih-main"/>
+		</munit:enable-flow-sources>
+		<munit:behavior>
+			<munit-tools:mock-when processor="wsc:consume">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="wsc-consume-borland-get-article"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-call flow="mock-bor-empty-http-flow"/>
+			</munit-tools:mock-when>
+			<set-variable variableName="testPath" value="/api/v1/price-providers/providers/BOR/products/99/price"/>
+		</munit:behavior>
+		<munit:execution>
+			<flow-ref name="test-http-get-price-flow"/>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(404)]"/>
+			<munit-tools:assert-that expression="#[payload.code]" is="#[MunitTools::equalTo('PRODUCT_NOT_FOUND')]"/>
+		</munit:validation>
+	</munit:test>
+
+	<!-- Propósito: Borland caído responde 503 con Retry-After. Escenario: WSC:CANNOT_DISPATCH. Resultado esperado: 503, SERVICE_UNAVAILABLE y header Retry-After. -->
+	<munit:test name="apiGetPrice_whenBorUnavailable_thenReturn503WithRetryAfter">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="sapi-price-providers-tih-main"/>
+		</munit:enable-flow-sources>
+		<munit:behavior>
+			<munit-tools:mock-when processor="wsc:consume">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="wsc-consume-borland-get-article"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:error typeId="WSC:CANNOT_DISPATCH"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<set-variable variableName="testPath" value="/api/v1/price-providers/providers/BOR/products/1/price"/>
+		</munit:behavior>
+		<munit:execution>
+			<flow-ref name="test-http-get-price-flow"/>
+			<set-variable variableName="statusCode" value="#[attributes.statusCode]"/>
+			<set-variable variableName="retryAfter" value="#[attributes.headers.'retry-after']"/>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[vars.statusCode]" is="#[MunitTools::equalTo(503)]"/>
+			<munit-tools:assert-that expression="#[payload.code]" is="#[MunitTools::equalTo('SERVICE_UNAVAILABLE')]"/>
+			<munit-tools:assert-that expression="#[payload.retryable]" is="#[MunitTools::equalTo(true)]"/>
+			<munit-tools:assert-that expression="#[vars.retryAfter]" is="#[MunitTools::equalTo('30')]"/>
+		</munit:validation>
+	</munit:test>
+
+	<flow name="mock-bor-article-http-flow">
+		<ee:transform>
+			<ee:message>
+				<ee:set-payload><![CDATA[%dw 2.0
+output application/java
+---
+{ headers: {}, attachments: {}, body: read('<tem:GetArticleByIdResponse xmlns:tem="http://tempuri.org/"><tem:GetArticleByIdResult><tem:ArticleId>1</tem:ArticleId><tem:Name>Lord of the Rings - Fellowship of the Ring</tem:Name><tem:Price>34.99</tem:Price></tem:GetArticleByIdResult></tem:GetArticleByIdResponse>', 'application/xml') }]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+	</flow>
+
+	<flow name="mock-bor-empty-http-flow">
+		<ee:transform>
+			<ee:message>
+				<ee:set-payload><![CDATA[%dw 2.0
+output application/java
+---
+{ headers: {}, attachments: {}, body: read('<tem:GetArticleByIdResponse xmlns:tem="http://tempuri.org/"/>', 'application/xml') }]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+	</flow>
+
+
+	<!-- Propósito: APIkit rechaza proveedores fuera del contrato. Escenario: proveedor XXX. Resultado esperado: 400 VALIDATION_ERROR. -->
+	<munit:test name="apiGetPrice_whenProviderInvalid_thenReturn400">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="sapi-price-providers-tih-main"/>
+		</munit:enable-flow-sources>
+		<munit:behavior>
+			<set-variable variableName="testPath" value="/api/v1/price-providers/providers/XXX/products/1/price"/>
+		</munit:behavior>
+		<munit:execution>
+			<flow-ref name="test-http-get-price-flow"/>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(400)]"/>
+			<munit-tools:assert-that expression="#[payload.code]" is="#[MunitTools::equalTo('VALIDATION_ERROR')]"/>
+		</munit:validation>
+	</munit:test>
+
+	<!-- Propósito: ruta inexistente responde 404 del catálogo. Resultado esperado: 404 RESOURCE_NOT_FOUND. -->
+	<munit:test name="apiGetUnknownPath_thenReturn404">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="sapi-price-providers-tih-main"/>
+		</munit:enable-flow-sources>
+		<munit:behavior>
+			<set-variable variableName="testPath" value="/api/v1/price-providers/nope"/>
+		</munit:behavior>
+		<munit:execution>
+			<flow-ref name="test-http-get-price-flow"/>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(404)]"/>
+			<munit-tools:assert-that expression="#[payload.code]" is="#[MunitTools::equalTo('RESOURCE_NOT_FOUND')]"/>
+		</munit:validation>
+	</munit:test>
+
+</mule>

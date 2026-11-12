@@ -1,0 +1,108 @@
+#%RAML 1.0
+title: sapi-oracle-core-tih
+version: v1
+baseUri: http://localhost:8091/api/v1/core/store
+protocols: [HTTP]
+mediaType: application/json
+description: |
+  System API sobre la base de datos core de la tienda (Oracle, esquema STORE_APP).
+  Solo accede a Oracle y no contiene reglas de negocio. Traduce las columnas (snake_case) al modelo JSON (camelCase).
+  No modifica el esquema: solo lee y escribe filas de CUSTOMERS, INVENTORY y ORDERS.
+
+uses:
+  types: fragments/tih-common-types.raml
+  traits: fragments/tih-common-traits.raml
+
+/customers:
+  post:
+    displayName: Crear cliente
+    description: Inserta un cliente con el id y la fecha que genera papi-customers-tih.
+    is: [traits.secured, traits.validated, traits.conflict, traits.retryable]
+    body:
+      application/json:
+        type: types.Customer
+    responses:
+      201:
+        description: Cliente creado.
+        body:
+          application/json:
+            type: types.Customer
+  get:
+    displayName: Buscar clientes por email o teléfono
+    description: Devuelve los clientes que coinciden con el email o con el teléfono. Se requiere al menos un filtro.
+    is: [traits.secured, traits.validated, traits.retryable]
+    queryParameters:
+      email:
+        type: types.Email
+        required: false
+      phone:
+        type: types.Phone
+        required: false
+    responses:
+      200:
+        description: Clientes encontrados (la lista puede estar vacía).
+        body:
+          application/json:
+            type: types.CustomerList
+
+  /{customerId}:
+    uriParameters:
+      customerId:
+        type: types.Uuid
+    get:
+      displayName: Consultar cliente por id
+      is: [traits.secured, traits.not-found, traits.retryable]
+      responses:
+        200:
+          description: Cliente encontrado.
+          body:
+            application/json:
+              type: types.Customer
+
+/inventory/items:
+  get:
+    displayName: Consultar artículos por ids
+    description: Consulta en lote. Los ids que no existen no aparecen en la respuesta; el consumidor decide si es un error.
+    is: [traits.secured, traits.validated, traits.retryable]
+    queryParameters:
+      ids:
+        description: Lista de ids de artículos separados por coma (máximo 100).
+        type: string
+        pattern: '^[0-9a-fA-F-]{36}(,[0-9a-fA-F-]{36}){0,99}$'
+        example: c1a2b3c4-d5e6-4789-a012-3456789abc01,7a8b9c0d-1e2f-43a4-b5c6-d7e8f9a0b1c2
+    responses:
+      200:
+        description: Artículos encontrados.
+        body:
+          application/json:
+            type: types.InventoryItemList
+
+/orders:
+  post:
+    displayName: Registrar pedido
+    description: Inserta una fila en ORDERS por cada línea del pedido, todo en una sola transacción.
+    is: [traits.secured, traits.validated, traits.conflict, traits.retryable]
+    body:
+      application/json:
+        type: types.OrderRecordRequest
+    responses:
+      201:
+        description: Pedido registrado.
+        body:
+          application/json:
+            type: types.Order
+
+  /{orderId}:
+    uriParameters:
+      orderId:
+        type: types.Uuid
+    get:
+      displayName: Consultar pedido
+      description: Se usa para comprobar si un pedido ya fue registrado (idempotencia).
+      is: [traits.secured, traits.not-found, traits.retryable]
+      responses:
+        200:
+          description: Pedido encontrado.
+          body:
+            application/json:
+              type: types.Order

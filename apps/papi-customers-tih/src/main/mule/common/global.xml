@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd">
+
+	<global-property name="env" value="dev"
+		doc:name="Global Property"
+		doc:description="Ambiente activo. Se sobrescribe al arrancar con -Denv=dev (local es el valor por defecto)"/>
+
+	<configuration-properties file="properties/${env}-application-config.yaml"
+		doc:name="Configuration properties"
+		doc:description="Propiedades del ambiente: puerto del listener y ubicación de sapi-oracle-core-tih"/>
+
+	<configuration defaultErrorHandler-ref="global-error-handler"
+		doc:name="Configuration"
+		doc:description="Manejador de errores global: convierte cualquier error en el ErrorResponse del contrato"/>
+
+	<http:listener-config name="papi-customers-tih-httpListenerConfig"
+		doc:name="HTTP Listener config"
+		doc:description="Listener HTTP de la API. Puerto y host salen de las propiedades del ambiente">
+		<http:listener-connection host="${http.listener.host}" port="${http.listener.port}"
+			doc:description="Abre el puerto HTTP del ambiente en el host configurado, sin TLS (uso local)"/>
+	</http:listener-config>
+
+	<http:request-config name="sapi-oracle-core-http-config" basePath="${sapi.oracleCore.basePath}" responseTimeout="${sapi.oracleCore.timeoutMillis}"
+		doc:name="HTTP Request configuration sapi-oracle-core"
+		doc:description="Cliente HTTP hacia sapi-oracle-core-tih. Host, puerto y ruta base salen de las propiedades">
+		<http:request-connection host="${sapi.oracleCore.host}" port="${sapi.oracleCore.port}"
+			doc:description="Conexión HTTP sin TLS (uso local) con la System API de Oracle"/>
+	</http:request-config>
+
+	<!-- Manejador global (se activa con defaultErrorHandler-ref en la configuración global).
+	     Solo traduce errores: no contiene lógica de negocio. -->
+	<error-handler name="global-error-handler"
+		doc:name="Error Handler"
+		doc:description="Convierte cualquier error en el ErrorResponse del contrato con el código HTTP que corresponde">
+		<on-error-propagate type="ANY" enableNotifications="true" logException="false"
+			doc:name="On Error Propagate"
+			doc:description="Atiende errores de APIkit, de negocio (APP) y de base de datos (DB)">
+			<logger level="ERROR"
+				message="#['ERROR - ' ++ (error.errorType.namespace default 'MULE') ++ ':' ++ (error.errorType.identifier default 'ANY') ++ ' - ' ++ (error.description default '') ++ ' correlationId: ' ++ correlationId]"
+				doc:name="logger-global-error"
+				doc:description="Registra el tipo de error, su descripción y el correlationId"/>
+			<ee:transform doc:name="transform-resolve-error-info"
+				doc:description="Resuelve estado HTTP, código, mensaje y si es reintentable a partir del tipo de error">
+				<ee:message doc:description="Sin cambios al payload; solo se calcula la variable errorInfo"/>
+				<ee:variables>
+					<ee:set-variable variableName="errorInfo" resource="dataweave/mapping-error-info.dwl"
+						doc:description="Busca el tipo de error en el catálogo y devuelve status, code, message y retryable"/>
+				</ee:variables>
+			</ee:transform>
+			<ee:transform doc:name="transform-build-error-response"
+				doc:description="Arma el ErrorResponse, el estado HTTP y el header Retry-After cuando el error es reintentable">
+				<ee:message doc:description="Define el nuevo payload con el ErrorResponse del contrato">
+					<ee:set-payload resource="dataweave/mapping-error-response.dwl"
+						doc:description="Construye el ErrorResponse con code, message, correlationId, timestamp y retryable"/>
+				</ee:message>
+				<ee:variables>
+					<ee:set-variable variableName="httpStatus"
+						doc:description="Guarda el estado HTTP con el que el listener responde el error"><![CDATA[%dw 2.0
+output application/java
+---
+vars.errorInfo.status]]></ee:set-variable>
+					<ee:set-variable variableName="outboundHeaders"
+						doc:description="Agrega Retry-After cuando el error es 503 para indicar cuándo reintentar"><![CDATA[%dw 2.0
+output application/java
+---
+if (vars.errorInfo.status == 503) { "Retry-After": p('error.retryAfterSeconds') } else {}]]></ee:set-variable>
+				</ee:variables>
+			</ee:transform>
+		</on-error-propagate>
+	</error-handler>
+
+</mule>

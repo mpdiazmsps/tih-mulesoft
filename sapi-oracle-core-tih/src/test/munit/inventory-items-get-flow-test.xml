@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns:munit="http://www.mulesoft.org/schema/mule/munit"
+	xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+		http://www.mulesoft.org/schema/mule/munit http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+		http://www.mulesoft.org/schema/mule/munit-tools http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd">
+
+	<munit:config name="inventory-items-get-flow-test.xml"/>
+
+	<!-- Propósito: GET /inventory/items devuelve los artículos con la forma del contrato.
+	     Escenario: dos ids, Oracle (mock) devuelve dos artículos (uno con precio de proveedor).
+	     Resultado esperado: 2 artículos; los campos NULL se omiten y los de proveedor aparecen. -->
+	<munit:test name="inventoryItemsGet_whenIdsExist_thenReturnItems"
+		description="Devuelve los artículos solicitados">
+		<munit:behavior>
+			<munit-tools:mock-when processor="db:select">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="db-select-inventory-items"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/java --- readUrl('classpath://payloads/inventory-rows.json', 'application/json')]"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+		</munit:behavior>
+		<munit:execution>
+			<munit:set-event>
+				<munit:attributes value="#[{ queryParams: { ids: 'c1a2b3c4-d5e6-4789-a012-3456789abc01,7a8b9c0d-1e2f-43a4-b5c6-d7e8f9a0b1c2' } }]"/>
+			</munit:set-event>
+			<flow-ref name="get:\inventory\items:sapi-oracle-core-tih-config"/>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[sizeOf(payload.items)]" is="#[MunitTools::equalTo(2)]"/>
+			<munit-tools:assert-that expression="#[payload.items[0].name]" is="#[MunitTools::equalTo('Teclado Mecanico')]"/>
+			<munit-tools:assert-that expression="#[payload.items[0].externalId]" is="#[MunitTools::nullValue()]"/>
+			<munit-tools:assert-that expression="#[payload.items[1].providerAbv]" is="#[MunitTools::equalTo('FAK')]"/>
+			<munit-tools:assert-that expression="#[payload.items[1].externalId as String]" is="#[MunitTools::equalTo('1')]"/>
+			<munit-tools:assert-that expression="#[payload.items[1].localPrice as String]" is="#[MunitTools::equalTo('0')]"/>
+		</munit:validation>
+	</munit:test>
+
+	<!-- Propósito: los ids que no existen simplemente no aparecen.
+	     Escenario: Oracle (mock) devuelve cero filas. Resultado esperado: items = []. -->
+	<munit:test name="inventoryItemsGet_whenNoIdExists_thenReturnEmptyList"
+		description="Devuelve una lista vacía si ningún id existe">
+		<munit:behavior>
+			<munit-tools:mock-when processor="db:select">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="db-select-inventory-items"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/java --- []]"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+		</munit:behavior>
+		<munit:execution>
+			<munit:set-event>
+				<munit:attributes value="#[{ queryParams: { ids: '00000000-0000-0000-0000-000000000000' } }]"/>
+			</munit:set-event>
+			<flow-ref name="get:\inventory\items:sapi-oracle-core-tih-config"/>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[sizeOf(payload.items)]" is="#[MunitTools::equalTo(0)]"/>
+		</munit:validation>
+	</munit:test>
+
+	<!-- Propósito: el SQL se arma con un parámetro nombrado por id y sin ids repetidos; nunca concatena valores.
+	     Escenario: tres ids con uno repetido. Resultado esperado: IN (:id0, :id1) y 2 parámetros con los valores. -->
+	<munit:test name="inventoryQuery_whenDuplicateIds_thenDeduplicateAndNameParameters"
+		description="Genera el SQL parametrizado y sin ids duplicados">
+		<munit:execution>
+			<munit:set-event>
+				<munit:attributes value="#[{ queryParams: { ids: 'aaa, bbb ,aaa' } }]"/>
+			</munit:set-event>
+			<ee:transform doc:name="transform-build-inventory-query-under-test">
+				<ee:message>
+					<ee:set-payload resource="dataweave/mapping-inventory-query.dwl"/>
+				</ee:message>
+			</ee:transform>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[payload.sql]" is="#[MunitTools::containsString('WHERE ID IN (:id0, :id1)')]"/>
+			<munit-tools:assert-that expression="#[sizeOf(payload.params)]" is="#[MunitTools::equalTo(2)]"/>
+			<munit-tools:assert-that expression="#[payload.params.id0]" is="#[MunitTools::equalTo('aaa')]"/>
+			<munit-tools:assert-that expression="#[payload.params.id1]" is="#[MunitTools::equalTo('bbb')]"/>
+			<munit-tools:assert-that expression="#[payload.sql contains 'aaa']" is="#[MunitTools::equalTo(false)]"/>
+		</munit:validation>
+	</munit:test>
+
+</mule>

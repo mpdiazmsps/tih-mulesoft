@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:db="http://www.mulesoft.org/schema/mule/db"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/db http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd
+		http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+	<flow name="inventory-items-get-flow"
+		doc:name="inventory-items-get-flow"
+		doc:description="Consulta en lote artículos del inventario por una lista de ids separados por coma">
+		<logger level="INFO"
+			message="#['INIT - Get inventory items SAPI, timeExecute: ' ++ (now() as String) ++ ' correlationId: ' ++ correlationId]"
+			doc:name="logger-get-inventory-start"
+			doc:description="Registra el inicio de la consulta de inventario"/>
+		<ee:transform doc:name="transform-inventory-query"
+			doc:description="Genera el SQL con un parámetro nombrado por id (sin concatenar valores) y su mapa de parámetros">
+			<ee:message doc:description="Sin cambios al payload; solo se calcula la variable inventoryQuery"/>
+			<ee:variables>
+				<ee:set-variable variableName="inventoryQuery" resource="dataweave/mapping-inventory-query.dwl"
+					doc:description="Arma el SQL con IN (:id0, :id1...) y el mapa de parámetros, sin ids repetidos"/>
+			</ee:variables>
+		</ee:transform>
+		<db:select config-ref="oracle-core-db-config"
+			doc:name="db-select-inventory-items"
+			doc:description="Lee los artículos de INVENTORY cuyos ids se solicitaron">
+			<db:sql>#[vars.inventoryQuery.sql]</db:sql>
+			<db:input-parameters>#[vars.inventoryQuery.params]</db:input-parameters>
+		</db:select>
+		<ee:transform doc:name="transform-inventory-items-response"
+			doc:description="Convierte las filas de Oracle en la lista de artículos del contrato">
+			<ee:message doc:description="Define el payload de la respuesta con los artículos">
+				<ee:set-payload resource="dataweave/mapping-inventory-items-response.dwl"
+					doc:description="Convierte las filas de INVENTORY en la lista items del contrato, omitiendo los campos NULL"/>
+			</ee:message>
+		</ee:transform>
+		<logger level="INFO"
+			message="#[output application/java --- 'END - Get inventory items SAPI, found: ' ++ (sizeOf(payload.items) as String) ++ ' correlationId: ' ++ correlationId]"
+			doc:name="logger-get-inventory-end"
+			doc:description="Registra el fin de la consulta con el número de artículos encontrados"/>
+	</flow>
+
+</mule>

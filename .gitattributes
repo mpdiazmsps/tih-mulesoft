@@ -1,0 +1,4 @@
+# Los scripts que corren dentro de los contenedores Linux deben conservar finales de línea LF,
+# aunque el repositorio se clone en Windows.
+*.sh text eol=lf
+*.ps1 text eol=crlf

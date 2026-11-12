@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:apikit="http://www.mulesoft.org/schema/mule/mule-apikit"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+		http://www.mulesoft.org/schema/mule/mule-apikit http://www.mulesoft.org/schema/mule/mule-apikit/current/mule-apikit.xsd">
+
+
+	<apikit:config name="papi-orders-tih-config"
+		api="api/papi-orders-tih.raml"
+		outboundHeadersMapName="outboundHeaders"
+		httpStatusVarName="httpStatus"
+		doc:name="APIkit Router config"
+		doc:description="Valida cada petición contra el RAML papi-orders-tih y la enruta al flujo de interfaz"/>
+
+	<flow name="papi-orders-tih-main"
+		doc:name="papi-orders-tih-main"
+		doc:description="Punto de entrada HTTP. Los errores los resuelve el manejador global">
+		<http:listener config-ref="papi-orders-tih-httpListenerConfig" path="${http.listener.basePath}/*"
+			doc:name="Listener"
+			doc:description="Recibe las peticiones en la ruta base de la API">
+			<http:response statusCode="#[vars.httpStatus default 200]">
+				<http:headers>#[vars.outboundHeaders default {}]</http:headers>
+			</http:response>
+			<http:error-response statusCode="#[vars.httpStatus default 500]">
+				<http:body>#[payload]</http:body>
+				<http:headers>#[vars.outboundHeaders default {}]</http:headers>
+			</http:error-response>
+		</http:listener>
+		<apikit:router config-ref="papi-orders-tih-config"
+			doc:name="APIkit Router"
+			doc:description="Enruta la petición al flujo de interfaz que corresponde al método y recurso del RAML"/>
+	</flow>
+
+	<!-- Flujos de interfaz del scaffolding de APIkit: solo conectan con la implementación. No renombrar. -->
+
+	<flow name="post:\orders:application\json:papi-orders-tih-config"
+		doc:name="post:\orders:application\json"
+		doc:description="Recibir pedido">
+		<flow-ref name="orders-receive-flow" doc:name="orders-receive-flow"
+			doc:description="Delega en la implementación de recepción de pedidos"/>
+	</flow>
+
+	<flow name="post:\orders\process:papi-orders-tih-config"
+		doc:name="post:\orders\process"
+		doc:description="Procesar pedidos pendientes">
+		<flow-ref name="orders-process-trigger-flow" doc:name="orders-process-trigger-flow"
+			doc:description="Delega en el disparo manual del procesamiento"/>
+	</flow>
+
+</mule>

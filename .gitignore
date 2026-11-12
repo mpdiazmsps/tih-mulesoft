@@ -1,0 +1,44 @@
+# Temporales de las skills de MuleSoft
+tmp/
+
+# Bitácoras de compilación locales
+mvn-last.log
+
+# Espacio de trabajo de Anypoint Studio (propio de cada equipo)
+.metadata/
+.mule/
+.tooling/
+.tooling-apps-cache/
+.settings/
+.classpath
+.project
+
+# Proyecto ajeno a TIH
+/sapi-stores/
+
+# Herramientas de asistente de código (locales)
+.claude/
+.agents/
+skills-lock.json
+
+# Salidas de build y dependencias
+target/
+node_modules/
+.venv/
+reports/
+
+# Credenciales: nunca se suben. Cada quien las crea desde los .example
+*.local
+*.local.json
+.env
+*-secure-application-config.yaml
+
+# Documentos de trabajo de docs/: solo se suben PLAN-tih-mulesoft.md y docs/diagrams/
+/docs/*.html
+/docs/*_files/
+
+# Sistema operativo y editores
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

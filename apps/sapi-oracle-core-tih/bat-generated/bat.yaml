@@ -1,0 +1,29 @@
+suite:
+  name: "sapi-oracle-core-tih BAT (generated from source)"
+files:
+  - file: tests/post-customer-happy-path.dwl
+  - file: tests/post-customer-phone-only.dwl
+  - file: tests/post-customer-duplicate-email.dwl
+  - file: tests/post-customer-invalid-email.dwl
+  - file: tests/post-customer-missing-name.dwl
+  - file: tests/get-customer-by-id.dwl
+  - file: tests/get-customer-not-found.dwl
+  - file: tests/get-customer-invalid-uuid.dwl
+  - file: tests/search-customers-by-email.dwl
+  - file: tests/search-customers-no-match.dwl
+  - file: tests/search-customers-no-filter.dwl
+  - file: tests/get-inventory-items.dwl
+  - file: tests/get-inventory-items-unknown-id.dwl
+  - file: tests/get-inventory-items-invalid-ids.dwl
+  - file: tests/post-order-happy-path.dwl
+  - file: tests/post-order-duplicate.dwl
+  - file: tests/post-order-unknown-item.dwl
+  - file: tests/post-order-empty-items.dwl
+  - file: tests/get-order-by-id.dwl
+  - file: tests/get-order-not-found.dwl
+  - file: tests/missing-client-headers.dwl
+reporters:
+  - type: HTML
+    outFile: reports/bat-report.html
+  - type: JSON
+    outFile: reports/bat-report.json

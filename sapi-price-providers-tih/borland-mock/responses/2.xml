@@ -1,0 +1,12 @@
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:tem="http://tempuri.org/">
+   <soapenv:Header/>
+   <soapenv:Body>
+      <tem:GetArticleByIdResponse>
+         <tem:GetArticleByIdResult>
+            <tem:ArticleId>2</tem:ArticleId>
+            <tem:Name>Jurassic Park</tem:Name>
+            <tem:Price>14.99</tem:Price>
+         </tem:GetArticleByIdResult>
+      </tem:GetArticleByIdResponse>
+   </soapenv:Body>
+</soapenv:Envelope>

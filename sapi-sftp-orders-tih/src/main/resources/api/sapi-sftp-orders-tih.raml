@@ -1,0 +1,85 @@
+#%RAML 1.0
+title: sapi-sftp-orders-tih
+version: v1
+baseUri: http://localhost:8092/api/v1/sftp/orders
+protocols: [HTTP]
+mediaType: application/json
+description: |
+  System API sobre el servidor SFTP de pedidos.
+  Carpetas: /orders/pending (por procesar), /orders/processed (procesados) y /orders/error (con error).
+  Los archivos se escriben primero como .tmp y luego se renombran a .csv, para que nadie lea un archivo a medio escribir.
+
+uses:
+  types: fragments/tih-common-types.raml
+  traits: fragments/tih-common-traits.raml
+
+/files:
+  get:
+    displayName: Listar archivos
+    description: Lista los CSV de la carpeta indicada. Por defecto, los pendientes.
+    is: [traits.secured, traits.validated, traits.retryable]
+    queryParameters:
+      status:
+        type: types.FileStatus
+        default: pending
+        required: false
+    responses:
+      200:
+        description: Archivos encontrados (la lista puede estar vacía).
+        body:
+          application/json:
+            type: types.FileList
+
+  /{fileName}:
+    uriParameters:
+      fileName:
+        type: types.FileName
+    put:
+      displayName: Depositar archivo de pedido
+      description: Crea el archivo en /orders/pending. No sobrescribe un archivo existente.
+      is: [traits.secured, traits.validated, traits.conflict, traits.retryable]
+      body:
+        text/csv:
+          type: string
+          example: |
+            item,qty
+            c1a2b3c4-d5e6-4789-a012-3456789abc01,2
+            7a8b9c0d-1e2f-43a4-b5c6-d7e8f9a0b1c2,1
+      responses:
+        201:
+          description: Archivo depositado.
+          body:
+            application/json:
+              type: types.FileInfo
+    get:
+      displayName: Leer archivo
+      is: [traits.secured, traits.not-found, traits.retryable]
+      queryParameters:
+        status:
+          type: types.FileStatus
+          default: pending
+          required: false
+      responses:
+        200:
+          description: Contenido del CSV.
+          body:
+            text/csv:
+              type: string
+              example: |
+                item,qty
+                c1a2b3c4-d5e6-4789-a012-3456789abc01,2
+
+    /move:
+      post:
+        displayName: Mover archivo
+        description: Mueve el archivo desde /orders/pending hacia /orders/processed o /orders/error.
+        is: [traits.secured, traits.validated, traits.not-found, traits.conflict, traits.retryable]
+        body:
+          application/json:
+            type: types.MoveFileRequest
+        responses:
+          200:
+            description: Archivo movido.
+            body:
+              application/json:
+                type: types.FileInfo

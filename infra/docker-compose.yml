@@ -1,0 +1,70 @@
+# Infraestructura local del proyecto TIH.
+#
+# Arranque recomendado: scripts/start-infra.ps1 (Windows) o scripts/start-infra.sh (Linux/macOS).
+# Los puertos y el archivo de definiciones de RabbitMQ se pueden cambiar en infra/.env (ver .env.example).
+#
+# El contenedor Oracle preexistente `oracle-store` (y `ngrok-oracle`) NO forma parte de este compose
+# y no se modifica. La base del proyecto TIH es un contenedor nuevo e independiente: `tih-oracle`.
+
+name: tih-infra
+
+services:
+  oracle-tih:
+    image: container-registry.oracle.com/database/free:latest
+    container_name: tih-oracle
+    hostname: tih-oracle
+    ports:
+      - "${ORACLE_PORT:-1521}:1521"       # listener
+      - "${ORACLE_EM_PORT:-5500}:5500"    # Enterprise Manager Express
+    env_file:
+      - ./oracle/credentials.local   # ORACLE_PWD, APP_USER, APP_USER_PASSWORD
+    volumes:
+      - tih-oracle-data:/opt/oracle/oradata
+      - ./oracle/init:/opt/oracle/scripts/startup:ro # se ejecuta en cada arranque; el script es idempotente
+      - ./oracle/sql:/opt/oracle/tih-sql:ro          # esquema y datos de ejemplo
+    healthcheck:
+      test: ["CMD", "/opt/oracle/checkDBStatus.sh"]
+      interval: 20s
+      timeout: 20s
+      retries: 30
+      start_period: 120s
+    restart: unless-stopped
+
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: tih-rabbitmq
+    hostname: tih-rabbitmq
+    ports:
+      - "${RABBITMQ_PORT:-5672}:5672"           # AMQP
+      - "${RABBITMQ_CONSOLE_PORT:-15672}:15672" # Consola web de administracion
+    volumes:
+      - ./rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+      # Exchanges, colas y DLQ. Los usuarios los crea scripts/start-infra con los datos de rabbitmq/credentials.local.
+      - ${RABBITMQ_DEFINITIONS_FILE:-./rabbitmq/definitions.json}:/etc/rabbitmq/definitions.json:ro
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+    restart: unless-stopped
+
+  # SFTP en Docker (alternativa a Rebex Tiny SFTP Server en Windows). Perfil opcional:
+  #   docker compose --profile sftp up -d
+  # El usuario es siempre `tihsftp`; su clave sale de SFTP_USERS en sftp/credentials.local.
+  sftp:
+    profiles: ["sftp"]
+    image: atmoz/sftp:alpine
+    container_name: tih-sftp
+    hostname: tih-sftp
+    ports:
+      - "${SFTP_PORT:-2222}:22"
+    env_file:
+      - ./sftp/credentials.local   # SFTP_USERS=tihsftp:<clave>:1001
+    volumes:
+      - tih-sftp-data:/home/tihsftp/orders
+      - ./sftp/docker/create-order-dirs.sh:/etc/sftp.d/create-order-dirs.sh:ro # crea pending, processed y error
+    restart: unless-stopped
+
+volumes:
+  tih-oracle-data:
+  tih-sftp-data:

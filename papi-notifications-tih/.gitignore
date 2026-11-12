@@ -1,0 +1,3 @@
+src/main/resources/properties/*-secure-application-config.yaml
+target/
+mvn-last.log

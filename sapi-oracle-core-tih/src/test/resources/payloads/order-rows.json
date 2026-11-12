@@ -1,0 +1,18 @@
+[
+  {
+    "ID": "9d8c7b6a-5f4e-4d3c-8b2a-1f0e9d8c7b6a",
+    "CLIENT_ID": "3f2b8c1e-7a4d-4e5b-9c0a-1d2e3f4a5b6c",
+    "ITEM_ID": "7a8b9c0d-1e2f-43a4-b5c6-d7e8f9a0b1c2",
+    "ITEM_QTY": 1,
+    "ITEM_PRICE": 109.95,
+    "CREATION_DATE": "20261007164000123"
+  },
+  {
+    "ID": "9d8c7b6a-5f4e-4d3c-8b2a-1f0e9d8c7b6a",
+    "CLIENT_ID": "3f2b8c1e-7a4d-4e5b-9c0a-1d2e3f4a5b6c",
+    "ITEM_ID": "c1a2b3c4-d5e6-4789-a012-3456789abc01",
+    "ITEM_QTY": 2,
+    "ITEM_PRICE": 1250,
+    "CREATION_DATE": "20261007164000123"
+  }
+]

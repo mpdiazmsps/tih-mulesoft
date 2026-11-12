@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+		http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+	<!-- Lógica compartida: la usan el recurso HTTP (reenvío manual) y el listener AMQP (ver pending/). -->
+	<flow name="notifications-process-order-registered-flow"
+		doc:name="notifications-process-order-registered-flow"
+		doc:description="Procesa un evento order.registered: obtiene el cliente y, si tiene email, envía el correo directamente a MagicBell">
+		<logger level="INFO"
+			message="#[output application/java --- 'INIT - Notify order registered PAPI, orderId: ' ++ (payload.orderId default 'n/a') ++ ' correlationId: ' ++ correlationId]"
+			doc:name="logger-notify-start"
+			doc:description="Registra el inicio del procesamiento del evento. No se registra el correo del cliente"/>
+		<!-- Los conectores reemplazan payload y attributes: el evento se guarda en una variable. -->
+		<ee:transform doc:name="transform-save-event"
+			doc:description="Guarda el evento en vars.event porque las llamadas HTTP reemplazan el payload">
+			<ee:message doc:description="Sin cambios al payload; solo se calcula la variable event"/>
+			<ee:variables>
+				<ee:set-variable variableName="event"
+					doc:description="Evento order.registered recibido"><![CDATA[%dw 2.0
+output application/java
+---
+payload]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+		<http:request method="GET" config-ref="papi-customers-http-config" path="#['/customers/' ++ vars.event.customerId]"
+			doc:name="http-request-get-customer"
+			doc:description="Consulta en papi-customers-tih al cliente del pedido para obtener su correo">
+			<http:headers>#[{ client_id: p('sapi.clientId'), client_secret: p('sapi.clientSecret'), 'x-correlation-id': correlationId }]</http:headers>
+			<http:response-validator>
+				<http:success-status-code-validator values="200..299,404"/>
+			</http:response-validator>
+		</http:request>
+		<choice doc:name="choice-customer-found"
+			doc:description="Responde 404 si el cliente no está registrado">
+			<when expression="#[attributes.statusCode == 404]"
+				doc:description="Se cumple cuando papi-customers-tih respondió 404">
+				<raise-error type="APP:CUSTOMER_NOT_FOUND"
+					description="El cliente no está registrado"
+					doc:name="raise-customer-not-found"
+					doc:description="Eleva el error de negocio que se responde como 404"/>
+			</when>
+		</choice>
+		<ee:transform doc:name="transform-save-customer"
+			doc:description="Guarda el cliente en vars.customer y decide si hay correo al que escribir">
+			<ee:message doc:description="Sin cambios al payload; solo se calculan customer y notificationStatus"/>
+			<ee:variables>
+				<ee:set-variable variableName="customer"
+					doc:description="Cliente devuelto por papi-customers"><![CDATA[%dw 2.0
+output application/java
+---
+payload]]></ee:set-variable>
+				<ee:set-variable variableName="notificationStatus"
+					doc:description="SKIPPED_NO_EMAIL si el cliente no tiene correo; SENT cuando se envíe"><![CDATA[%dw 2.0
+output application/java
+---
+if (isEmpty(payload.email)) "SKIPPED_NO_EMAIL" else "SENT"]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+		<choice doc:name="choice-has-email"
+			doc:description="Envía el correo solo si el cliente tiene email">
+			<when expression="#[vars.notificationStatus == 'SENT']"
+				doc:description="El cliente tiene email: se arma y envía la notificación">
+				<ee:transform doc:name="transform-broadcast-request"
+					doc:description="Arma el broadcast de MagicBell con destinatario, título y contenido del correo (override del canal email)">
+					<ee:message doc:description="Define el payload que se envía a MagicBell">
+						<ee:set-payload resource="dataweave/mapping-order-registered-email.dwl"
+							doc:description="Usa el nombre del cliente, el orderId y el total del evento"/>
+					</ee:message>
+				</ee:transform>
+				<http:request method="POST" config-ref="magicbell-http-config" path="${magicbell.broadcastsPath}"
+					doc:name="http-request-send-notification"
+					doc:description="POST /broadcasts en MagicBell autenticado con el token Bearer de Project Auth">
+					<http:headers><![CDATA[#[{ Authorization: 'Bearer ' ++ p('secure::magicbell.token'), 'Content-Type': 'application/json', Accept: 'application/json' }]]]></http:headers>
+					<http:response-validator>
+						<http:success-status-code-validator values="200..299,422"/>
+					</http:response-validator>
+				</http:request>
+				<choice doc:name="choice-magicbell-rejected"
+					doc:description="El conector HTTP no tiene tipo de error para 422: se traduce a un error de negocio">
+					<when expression="#[attributes.statusCode == 422]"
+						doc:description="MagicBell rechazó el destinatario o el contenido">
+						<raise-error type="APP:NOTIFICATION_REJECTED"
+							description="MagicBell rechazó la notificación"
+							doc:name="raise-notification-rejected"
+							doc:description="Eleva el error permanente que se responde como 502 PROVIDER_REJECTED"/>
+					</when>
+				</choice>
+			</when>
+			<otherwise doc:description="Sin email: se omite la notificación">
+				<logger level="WARN"
+					message="#[output application/java --- 'WARN - Customer has no email, notification skipped, orderId: ' ++ vars.event.orderId ++ ' correlationId: ' ++ correlationId]"
+					doc:name="logger-no-email"
+					doc:description="Registra que se omitió la notificación por falta de correo"/>
+			</otherwise>
+		</choice>
+		<ee:transform doc:name="transform-notification-result"
+			doc:description="Arma el NotificationResult con el orderId y el estado SENT o SKIPPED_NO_EMAIL">
+			<ee:message doc:description="Define el payload de la respuesta">
+				<ee:set-payload resource="dataweave/mapping-notification-result.dwl"
+					doc:description="Devuelve orderId y status"/>
+			</ee:message>
+		</ee:transform>
+		<logger level="INFO"
+			message="#[output application/java --- 'END - Notify order registered PAPI, orderId: ' ++ payload.orderId ++ ' status: ' ++ payload.status ++ ' correlationId: ' ++ correlationId]"
+			doc:name="logger-notify-end"
+			doc:description="Registra el fin del procesamiento con el estado"/>
+	</flow>
+
+</mule>

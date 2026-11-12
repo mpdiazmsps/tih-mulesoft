@@ -1,0 +1,239 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:munit="http://www.mulesoft.org/schema/mule/munit"
+	xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+		http://www.mulesoft.org/schema/mule/munit http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+		http://www.mulesoft.org/schema/mule/munit-tools http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd">
+
+	<!-- Pruebas HTTP: listener real en el puerto 8082 (debe estar libre) con sapi-oracle-core-tih simulada.
+	     Cubren APIkit, el catálogo de errores y los headers de la respuesta. -->
+	<munit:config name="papi-customers-tih-main-test.xml"/>
+
+	<http:request-config name="test-api-client" doc:name="HTTP Request configuration">
+		<http:request-connection host="localhost" port="8082"/>
+	</http:request-config>
+
+	<!-- APIkit arma su tabla de rutas con los flujos ya inicializados (MUnit los inicia de forma perezosa). -->
+	<munit:before-suite name="main-warm-up">
+		<try><flow-ref name="post:\customers:application\json:papi-customers-tih-config"/><error-handler><on-error-continue/></error-handler></try>
+		<try><flow-ref name="get:\customers\(customerId):papi-customers-tih-config"/><error-handler><on-error-continue/></error-handler></try>
+	</munit:before-suite>
+
+	<flow name="test-http-post-customer-flow">
+		<http:request method="POST" config-ref="test-api-client" path="/api/v1/customers-management/customers">
+			<http:body>#[vars.testBody]</http:body>
+			<http:headers><![CDATA[#[{ client_id: 'test-id', client_secret: 'test-secret', 'Content-Type': 'application/json' }]]]></http:headers>
+			<http:response-validator>
+				<http:success-status-code-validator values="0..599"/>
+			</http:response-validator>
+		</http:request>
+	</flow>
+
+	<flow name="test-http-get-customer-flow">
+		<http:request method="GET" config-ref="test-api-client" path="#[vars.testPath]">
+			<http:headers><![CDATA[#[{ client_id: 'test-id', client_secret: 'test-secret' }]]]></http:headers>
+			<http:response-validator>
+				<http:success-status-code-validator values="0..599"/>
+			</http:response-validator>
+		</http:request>
+	</flow>
+
+	<!-- Propósito: POST /customers responde 201. Escenario: cuerpo válido sin duplicados. Resultado esperado: 201 y CustomerCreated. -->
+	<munit:test name="apiPostCustomer_whenValid_thenReturn201">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="papi-customers-tih-main"/>
+		</munit:enable-flow-sources>
+		<munit:behavior>
+			<munit-tools:mock-when processor="http:request">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-search-duplicates"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[{ customers: [] }]" mediaType="application/java"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit-tools:mock-when processor="http:request">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-create-customer"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[{ id: '3f2b8c1e-7a4d-4e5b-9c0a-1d2e3f4a5b6c', name: 'Ana', creationDate: '2026-10-07T16:30:00.000Z' }]" mediaType="application/java"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<set-variable variableName="testBody" value="#['{&quot;name&quot;:&quot;Ana&quot;,&quot;email&quot;:&quot;ana@example.com&quot;}']"/>
+		</munit:behavior>
+		<munit:execution>
+			<flow-ref name="test-http-post-customer-flow"/>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(201)]"/>
+			<munit-tools:assert-that expression="#[payload.customerId]" is="#[MunitTools::equalTo('3f2b8c1e-7a4d-4e5b-9c0a-1d2e3f4a5b6c')]"/>
+		</munit:validation>
+	</munit:test>
+
+	<!-- Propósito: sin email ni teléfono responde 400. Resultado esperado: 400 VALIDATION_ERROR con el mensaje de la regla. -->
+	<munit:test name="apiPostCustomer_whenNoContact_thenReturn400">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="papi-customers-tih-main"/>
+		</munit:enable-flow-sources>
+		<munit:behavior>
+			<set-variable variableName="testBody" value="#['{&quot;name&quot;:&quot;Ana&quot;}']"/>
+		</munit:behavior>
+		<munit:execution>
+			<flow-ref name="test-http-post-customer-flow"/>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(400)]"/>
+			<munit-tools:assert-that expression="#[payload.code]" is="#[MunitTools::equalTo('VALIDATION_ERROR')]"/>
+			<munit-tools:assert-that expression="#[payload.message]" is="#[MunitTools::equalTo('Se requiere email o phone')]"/>
+		</munit:validation>
+	</munit:test>
+
+	<!-- Propósito: APIkit valida el contrato. Escenario: email con formato inválido. Resultado esperado: 400 VALIDATION_ERROR. -->
+	<munit:test name="apiPostCustomer_whenInvalidEmail_thenReturn400">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="papi-customers-tih-main"/>
+		</munit:enable-flow-sources>
+		<munit:behavior>
+			<set-variable variableName="testBody" value="#['{&quot;name&quot;:&quot;Ana&quot;,&quot;email&quot;:&quot;no-es-correo&quot;}']"/>
+		</munit:behavior>
+		<munit:execution>
+			<flow-ref name="test-http-post-customer-flow"/>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(400)]"/>
+			<munit-tools:assert-that expression="#[payload.code]" is="#[MunitTools::equalTo('VALIDATION_ERROR')]"/>
+		</munit:validation>
+	</munit:test>
+
+	<!-- Propósito: duplicado responde 409. Escenario: la búsqueda encuentra un cliente. Resultado esperado: 409 CUSTOMER_ALREADY_EXISTS. -->
+	<munit:test name="apiPostCustomer_whenDuplicate_thenReturn409">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="papi-customers-tih-main"/>
+		</munit:enable-flow-sources>
+		<munit:behavior>
+			<munit-tools:mock-when processor="http:request">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-search-duplicates"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[{ customers: [{ id: 'a', name: 'Ana' }] }]" mediaType="application/java"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<set-variable variableName="testBody" value="#['{&quot;name&quot;:&quot;Ana&quot;,&quot;email&quot;:&quot;ana@example.com&quot;}']"/>
+		</munit:behavior>
+		<munit:execution>
+			<flow-ref name="test-http-post-customer-flow"/>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(409)]"/>
+			<munit-tools:assert-that expression="#[payload.code]" is="#[MunitTools::equalTo('CUSTOMER_ALREADY_EXISTS')]"/>
+			<munit-tools:assert-that expression="#[payload.retryable]" is="#[MunitTools::equalTo(false)]"/>
+		</munit:validation>
+	</munit:test>
+
+	<!-- Propósito: Oracle caído responde 503 con Retry-After. Escenario: la búsqueda falla por conectividad.
+	     Resultado esperado: 503 SERVICE_UNAVAILABLE, retryable y Retry-After 30. -->
+	<munit:test name="apiPostCustomer_whenBackendUnavailable_thenReturn503WithRetryAfter">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="papi-customers-tih-main"/>
+		</munit:enable-flow-sources>
+		<munit:behavior>
+			<munit-tools:mock-when processor="http:request">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-search-duplicates"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:error typeId="HTTP:CONNECTIVITY"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<set-variable variableName="testBody" value="#['{&quot;name&quot;:&quot;Ana&quot;,&quot;email&quot;:&quot;ana@example.com&quot;}']"/>
+		</munit:behavior>
+		<munit:execution>
+			<flow-ref name="test-http-post-customer-flow"/>
+			<set-variable variableName="retryAfter" value="#[attributes.headers.'retry-after']"/>
+			<set-variable variableName="statusCode" value="#[attributes.statusCode]"/>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[vars.statusCode]" is="#[MunitTools::equalTo(503)]"/>
+			<munit-tools:assert-that expression="#[payload.code]" is="#[MunitTools::equalTo('SERVICE_UNAVAILABLE')]"/>
+			<munit-tools:assert-that expression="#[payload.retryable]" is="#[MunitTools::equalTo(true)]"/>
+			<munit-tools:assert-that expression="#[vars.retryAfter]" is="#[MunitTools::equalTo('30')]"/>
+		</munit:validation>
+	</munit:test>
+
+	<!-- Propósito: GET /customers/{id} responde 200. Escenario: cliente existente. Resultado esperado: 200 y Customer. -->
+	<munit:test name="apiGetCustomer_whenExists_thenReturn200">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="papi-customers-tih-main"/>
+		</munit:enable-flow-sources>
+		<munit:behavior>
+			<munit-tools:mock-when processor="http:request">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-get-customer"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[{ id: '3f2b8c1e-7a4d-4e5b-9c0a-1d2e3f4a5b6c', name: 'Ana', email: 'ana@example.com', creationDate: '2026-10-07T16:30:00.000Z' }]" mediaType="application/java"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<set-variable variableName="testPath" value="/api/v1/customers-management/customers/3f2b8c1e-7a4d-4e5b-9c0a-1d2e3f4a5b6c"/>
+		</munit:behavior>
+		<munit:execution>
+			<flow-ref name="test-http-get-customer-flow"/>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(200)]"/>
+			<munit-tools:assert-that expression="#[payload.email]" is="#[MunitTools::equalTo('ana@example.com')]"/>
+		</munit:validation>
+	</munit:test>
+
+	<!-- Propósito: cliente inexistente responde 404. Escenario: el backend responde 404. Resultado esperado: 404 CUSTOMER_NOT_FOUND. -->
+	<munit:test name="apiGetCustomer_whenNotFound_thenReturn404">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="papi-customers-tih-main"/>
+		</munit:enable-flow-sources>
+		<munit:behavior>
+			<munit-tools:mock-when processor="http:request">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-get-customer"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[{ code: 'CUSTOMER_NOT_FOUND' }]" mediaType="application/java"/>
+					<munit-tools:attributes value="#[{ statusCode: 404 }]"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<set-variable variableName="testPath" value="/api/v1/customers-management/customers/3f2b8c1e-7a4d-4e5b-9c0a-1d2e3f4a5b6c"/>
+		</munit:behavior>
+		<munit:execution>
+			<flow-ref name="test-http-get-customer-flow"/>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(404)]"/>
+			<munit-tools:assert-that expression="#[payload.code]" is="#[MunitTools::equalTo('CUSTOMER_NOT_FOUND')]"/>
+		</munit:validation>
+	</munit:test>
+
+	<!-- Propósito: APIkit valida el uuid. Escenario: id que no es UUID. Resultado esperado: 400 VALIDATION_ERROR. -->
+	<munit:test name="apiGetCustomer_whenIdNotUuid_thenReturn400">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="papi-customers-tih-main"/>
+		</munit:enable-flow-sources>
+		<munit:behavior>
+			<set-variable variableName="testPath" value="/api/v1/customers-management/customers/abc"/>
+		</munit:behavior>
+		<munit:execution>
+			<flow-ref name="test-http-get-customer-flow"/>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(400)]"/>
+			<munit-tools:assert-that expression="#[payload.code]" is="#[MunitTools::equalTo('VALIDATION_ERROR')]"/>
+		</munit:validation>
+	</munit:test>
+
+</mule>

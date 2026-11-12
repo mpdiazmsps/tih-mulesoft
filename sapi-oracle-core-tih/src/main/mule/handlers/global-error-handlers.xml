@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+	<!-- Manejador global (se activa desde common/global.xml con defaultErrorHandler-ref).
+	     Solo traduce errores: no contiene lógica de negocio. -->
+	<error-handler name="global-error-handler"
+		doc:name="Error Handler"
+		doc:description="Convierte cualquier error en el ErrorResponse del contrato con el código HTTP que corresponde">
+		<on-error-propagate type="ANY" enableNotifications="true" logException="false"
+			doc:name="On Error Propagate"
+			doc:description="Atiende errores de APIkit, de negocio (APP) y de base de datos (DB)">
+			<logger level="ERROR"
+				message="#['ERROR - ' ++ (error.errorType.namespace default 'MULE') ++ ':' ++ (error.errorType.identifier default 'ANY') ++ ' - ' ++ (error.description default '') ++ ' correlationId: ' ++ correlationId]"
+				doc:name="logger-global-error"
+				doc:description="Registra el tipo de error, su descripción y el correlationId"/>
+			<ee:transform doc:name="transform-resolve-error-info"
+				doc:description="Resuelve estado HTTP, código, mensaje y si es reintentable a partir del tipo de error">
+				<ee:message doc:description="Sin cambios al payload; solo se calcula la variable errorInfo"/>
+				<ee:variables>
+					<ee:set-variable variableName="errorInfo" resource="dataweave/mapping-error-info.dwl"
+						doc:description="Busca el tipo de error en el catálogo y devuelve status, code, message y retryable"/>
+				</ee:variables>
+			</ee:transform>
+			<ee:transform doc:name="transform-build-error-response"
+				doc:description="Arma el ErrorResponse, el estado HTTP y el header Retry-After cuando el error es reintentable">
+				<ee:message doc:description="Define el nuevo payload con el ErrorResponse del contrato">
+					<ee:set-payload resource="dataweave/mapping-error-response.dwl"
+						doc:description="Construye el ErrorResponse con code, message, correlationId, timestamp y retryable"/>
+				</ee:message>
+				<ee:variables>
+					<ee:set-variable variableName="httpStatus"
+						doc:description="Guarda el estado HTTP con el que el listener responde el error"><![CDATA[%dw 2.0
+output application/java
+---
+vars.errorInfo.status]]></ee:set-variable>
+					<ee:set-variable variableName="outboundHeaders"
+						doc:description="Agrega Retry-After cuando el error es 503 para indicar cuándo reintentar"><![CDATA[%dw 2.0
+output application/java
+---
+if (vars.errorInfo.status == 503) { "Retry-After": p('error.retryAfterSeconds') } else {}]]></ee:set-variable>
+				</ee:variables>
+			</ee:transform>
+		</on-error-propagate>
+	</error-handler>
+
+</mule>

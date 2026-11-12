@@ -1,0 +1,28 @@
+# Configuración del ambiente local. No hay credenciales: Fakestore y Escuelajs son APIs públicas.
+http:
+  listener:
+    host: "0.0.0.0"
+    port: "8093"
+    basePath: "/api/v1/price-providers"
+
+provider:
+  # Milisegundos de espera por la respuesta de un proveedor
+  timeoutMillis: "10000"
+  fak:
+    host: "fakestoreapi.com"
+    port: "443"
+    basePath: "/products"
+  esc:
+    host: "api.escuelajs.co"
+    port: "443"
+    basePath: "/api/v1/products"
+  bor:
+    # Servicio SOAP de Borland (en local, el mock de SoapUI). El WSDL va dentro de la app.
+    wsdlLocation: "wsdl/borland-orderservice.wsdl"
+    service: "OrderService"
+    port: "OrderServiceSoap"
+    address: "http://localhost:8088/mockOrderServiceSoap"
+
+# Segundos que se sugieren al consumidor en Retry-After cuando un proveedor no está disponible
+error:
+  retryAfterSeconds: "30"

@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:munit="http://www.mulesoft.org/schema/mule/munit"
+	xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/munit http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+		http://www.mulesoft.org/schema/mule/munit-tools http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd">
+
+	<!-- Pruebas de orders-publish-order-registered-subflow: amqp:publish se simula, no se toca el RabbitMQ real. -->
+	<munit:config name="publish-order-registered-test.xml"/>
+
+	<!-- Propósito: el pedido registrado se publica como evento. Escenario: Oracle devolvió el pedido con una línea.
+	     Resultado esperado: una publicación cuyo cuerpo es el OrderRegisteredEvent del contrato. -->
+	<munit:test name="publish_whenOrderRegistered_thenPublishesEvent">
+		<munit:behavior>
+			<munit-tools:mock-when processor="amqp:publish">
+				<munit-tools:then-return>
+					<munit-tools:payload value="#['published']" mediaType="application/java"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit:set-event>
+				<munit:payload value="#[{ id: 'o-1', customerId: 'c-1', items: [{ itemId: 'i-1', quantity: 2, price: 1250 }], total: 2500, creationDate: '2026-10-07T16:40:00Z' }]" mediaType="application/java"/>
+				<munit:variables>
+					<munit:variable key="orderId" value="#['o-1']"/>
+				</munit:variables>
+			</munit:set-event>
+		</munit:behavior>
+		<munit:execution>
+			<flow-ref name="orders-publish-order-registered-subflow"/>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[vars.orderEvent.eventType]" is="#[MunitTools::equalTo('order.registered')]"/>
+			<munit-tools:assert-that expression="#[vars.orderEvent.orderId]" is="#[MunitTools::equalTo('o-1')]"/>
+			<munit-tools:assert-that expression="#[vars.orderEvent.customerId]" is="#[MunitTools::equalTo('c-1')]"/>
+			<munit-tools:assert-that expression="#[vars.orderEvent.total]" is="#[MunitTools::equalTo(2500)]"/>
+			<munit-tools:verify-call processor="amqp:publish" times="1">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="amqp-publish-order-registered"/>
+				</munit-tools:with-attributes>
+			</munit-tools:verify-call>
+		</munit:validation>
+	</munit:test>
+
+	<!-- Propósito: un fallo de RabbitMQ no deshace el pedido. Escenario: amqp:publish falla (broker caído).
+	     Resultado esperado: el subflujo termina sin error (el pedido sigue registrado) y solo se deja constancia en el log. -->
+	<munit:test name="publish_whenBrokerFails_thenOrderStaysRegisteredWithoutError">
+		<munit:behavior>
+			<munit-tools:mock-when processor="amqp:publish">
+				<munit-tools:then-return>
+					<munit-tools:error typeId="AMQP:CONNECTIVITY"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit:set-event>
+				<munit:payload value="#[{ id: 'o-2', customerId: 'c-1', items: [{ itemId: 'i-1', quantity: 1, price: 10 }], total: 10, creationDate: '2026-10-07T16:40:00Z' }]" mediaType="application/java"/>
+				<munit:variables>
+					<munit:variable key="orderId" value="#['o-2']"/>
+				</munit:variables>
+			</munit:set-event>
+		</munit:behavior>
+		<munit:execution>
+			<flow-ref name="orders-publish-order-registered-subflow"/>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[vars.orderEvent.orderId]" is="#[MunitTools::equalTo('o-2')]"/>
+			<munit-tools:verify-call processor="amqp:publish" times="1"/>
+		</munit:validation>
+	</munit:test>
+
+</mule>

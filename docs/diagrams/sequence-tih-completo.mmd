@@ -1,0 +1,185 @@
+sequenceDiagram
+    autonumber
+    actor T as Tienda en línea
+    participant X as xapi-online-store-tih
+    participant PC as papi-customers-tih
+    participant PO as papi-orders-tih
+    participant PN as papi-notifications-tih
+    participant SO as sapi-oracle-core-tih
+    participant SS as sapi-sftp-orders-tih
+    participant SP as sapi-price-providers-tih
+    participant SM as sapi-magicbell-tih
+    participant MQ as RabbitMQ
+    participant DB as Oracle STORE_APP
+    participant FS as SFTP Rebex
+    participant PV as Proveedores FAK / ESC
+    participant MB as MagicBell
+
+    Note over T,MB: Todas las llamadas HTTP llevan client_id/client_secret (Client ID Enforcement) y x-correlation-id
+
+    rect rgb(232, 243, 255)
+    Note over T,DB: P1 - Registro de cliente
+    T->>X: POST /customers
+    X->>PC: POST /customers
+    alt Payload inválido o sin email ni teléfono
+        PC-->>X: 400 VALIDATION_ERROR
+        X-->>T: 400
+    else Datos válidos
+        PC->>SO: GET /customers?email=&phone=
+        SO->>DB: SELECT en CUSTOMERS
+        DB-->>SO: coincidencias
+        SO-->>PC: lista de clientes
+        alt Ya existe email o teléfono
+            PC-->>X: 409 CUSTOMER_ALREADY_EXISTS
+            X-->>T: 409
+        else Cliente nuevo
+            PC->>PC: Generar UUID y fecha de creación
+            PC->>SO: POST /customers
+            SO->>DB: INSERT en CUSTOMERS
+            alt Oracle no disponible
+                SO-->>PC: 503 retryable
+                PC-->>X: 503 retryable
+                X-->>T: 503 Retry-After (reintentar)
+            else Inserción exitosa
+                SO-->>PC: 201
+                PC-->>X: 201 customerId
+                X-->>T: 201 customerId
+            end
+        end
+    end
+    end
+
+    rect rgb(235, 250, 235)
+    Note over T,FS: P2 - Recepción de pedido
+    T->>X: POST /orders (customerId e items)
+    X->>PO: POST /orders
+    alt Payload inválido (sin items, qty <= 0, UUID mal formado)
+        PO-->>X: 400 VALIDATION_ERROR
+        X-->>T: 400
+    else Payload válido
+        PO->>PC: GET /customers/{customerId}
+        PC->>SO: GET /customers/{customerId}
+        SO->>DB: SELECT en CUSTOMERS
+        DB-->>SO: cliente o vacío
+        SO-->>PC: cliente o 404
+        PC-->>PO: cliente o 404
+        alt Cliente no registrado
+            PO-->>X: 404 CUSTOMER_NOT_FOUND
+            X-->>T: 404
+        else Cliente registrado
+            PO->>PO: Generar orderId y construir CSV item,qty
+            PO->>SS: PUT /files/customerId_orderId.csv
+            SS->>FS: Escribir .tmp y renombrar a .csv en /orders/pending
+            alt SFTP no disponible
+                SS-->>PO: 503 retryable
+                PO-->>X: 503 retryable
+                X-->>T: 503 Retry-After (reintentar)
+            else Depósito exitoso
+                FS-->>SS: archivo creado
+                SS-->>PO: 201
+                PO-->>X: 201 orderId
+                X-->>T: 201 orderId, estado RECEIVED
+            end
+        end
+    end
+    end
+
+    rect rgb(255, 248, 225)
+    Note over PO,PV: P3 - Procesamiento programado (cada N minutos, o POST /orders/process)
+    PO->>PO: Scheduler dispara (maxConcurrency 1)
+    PO->>SS: GET /files?status=pending
+    SS->>FS: Listar *.csv en /orders/pending
+    FS-->>SS: archivos
+    SS-->>PO: lista de archivos
+    loop Por cada archivo pendiente
+        PO->>SO: GET /orders/{orderId}
+        SO->>DB: SELECT en ORDERS
+        DB-->>SO: filas o vacío
+        SO-->>PO: pedido existente o 404
+        alt Pedido ya registrado (idempotencia)
+            PO->>SS: POST /files/{fileName}/move a processed
+            SS->>FS: Mover a /orders/processed
+        else Pedido nuevo
+            PO->>SS: GET /files/{fileName}
+            SS->>FS: Leer CSV
+            FS-->>SS: contenido
+            SS-->>PO: CSV
+            PO->>SO: GET /inventory/items?ids=
+            SO->>DB: SELECT en INVENTORY
+            DB-->>SO: artículos
+            SO-->>PO: artículos con precio local y proveedor
+            alt Artículo inexistente o CSV corrupto
+                PO->>SS: POST /files/{fileName}/move a error
+                SS->>FS: Mover a /orders/error
+            else Artículos válidos
+                loop Por cada artículo
+                    alt local_price mayor a 0
+                        PO->>PO: Usar precio de la tienda
+                    else local_price igual a 0
+                        PO->>SP: GET /providers/{FAK|ESC|BOR}/products/{externalId}/price
+                        alt BOR (SOAP) fuera de alcance por ahora
+                            SP-->>PO: 501 PROVIDER_NOT_SUPPORTED
+                        else FAK o ESC (REST)
+                            SP->>PV: GET /products/{id}
+                            alt Proveedor no responde
+                                PV--xSP: timeout o error
+                                SP-->>PO: 502 o 503 retryable
+                            else Proveedor responde
+                                PV-->>SP: producto
+                                SP-->>PO: precio canónico
+                            end
+                        end
+                    end
+                end
+                alt Proveedor no soportado (BOR)
+                    PO->>SS: POST /files/{fileName}/move a error
+                    SS->>FS: Mover a /orders/error
+                else Falló un proveedor (transitorio)
+                    Note over PO,FS: El archivo queda en /pending y se reintenta en el siguiente ciclo
+                else Todos los precios resueltos
+                    PO->>SO: POST /orders (una sola transacción)
+                    SO->>DB: INSERT de una fila por artículo en ORDERS
+                    DB-->>SO: OK
+                    SO-->>PO: 201
+                    PO-)MQ: Publicar order.registered en orders.events
+                    PO->>SS: POST /files/{fileName}/move a processed
+                    SS->>FS: Mover a /orders/processed
+                end
+            end
+        end
+    end
+    end
+
+    rect rgb(250, 235, 245)
+    Note over MQ,MB: P4 - Notificación asíncrona por correo
+    MQ-)PN: Consume orders.registered.q (ACK manual)
+    PN->>PC: GET /customers/{customerId}
+    PC->>SO: GET /customers/{customerId}
+    SO->>DB: SELECT en CUSTOMERS
+    DB-->>SO: cliente
+    SO-->>PC: cliente
+    PC-->>PN: cliente
+    alt Cliente sin email
+        PN->>PN: Log WARN
+        PN-)MQ: ACK (se omite la notificación)
+    else Cliente con email
+        PN->>PN: Armar correo con DataWeave
+        loop Hasta 3 intentos con backoff
+            PN->>SM: POST /notifications
+            SM->>MB: Enviar notificación por email
+            alt MagicBell responde OK
+                MB-->>SM: 2xx
+                SM-->>PN: 201
+            else MagicBell falla
+                MB--xSM: error
+                SM-->>PN: 502 o 503
+            end
+        end
+        alt Envío exitoso
+            PN-)MQ: ACK
+        else Reintentos agotados
+            PN-)MQ: Reject sin requeue
+            MQ->>MQ: Dead-letter a orders.registered.dlq
+        end
+    end
+    end

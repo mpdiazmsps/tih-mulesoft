@@ -1,0 +1,274 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns:munit="http://www.mulesoft.org/schema/mule/munit"
+	xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+		http://www.mulesoft.org/schema/mule/munit http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+		http://www.mulesoft.org/schema/mule/munit-tools http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd">
+
+	<!-- Pruebas unitarias de price-get-flow: los proveedores se simulan por doc:name del http:request, sin salir a internet. -->
+	<munit:config name="get-price-test.xml"/>
+
+	<!-- Propósito: FAK devuelve el Price canónico. Escenario: Fakestore responde title y price.
+	     Resultado esperado: externalId numérico, providerAbv FAK, name, price y currency USD. -->
+	<munit:test name="getPrice_whenFakProductExists_thenReturnCanonicalPrice">
+		<munit:behavior>
+			<munit-tools:mock-when processor="http:request">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-fakestore"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[{ id: 1, title: 'Backpack', price: 109.95 }]" mediaType="application/java"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit:set-event>
+				<munit:attributes value="#[{ uriParams: { providerAbv: 'FAK', externalId: '1' } }]"/>
+			</munit:set-event>
+		</munit:behavior>
+		<munit:execution>
+			<flow-ref name="price-get-flow"/>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[payload.externalId]" is="#[MunitTools::equalTo(1)]"/>
+			<munit-tools:assert-that expression="#[payload.providerAbv]" is="#[MunitTools::equalTo('FAK')]"/>
+			<munit-tools:assert-that expression="#[payload.name]" is="#[MunitTools::equalTo('Backpack')]"/>
+			<munit-tools:assert-that expression="#[payload.price]" is="#[MunitTools::equalTo(109.95)]"/>
+			<munit-tools:assert-that expression="#[payload.currency]" is="#[MunitTools::equalTo('USD')]"/>
+			<munit-tools:verify-call processor="http:request" times="1">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-fakestore"/>
+				</munit-tools:with-attributes>
+			</munit-tools:verify-call>
+		</munit:validation>
+	</munit:test>
+
+	<!-- Propósito: ESC devuelve el Price canónico. Escenario: Escuelajs responde title y price.
+	     Resultado esperado: Price con providerAbv ESC y solo se llama a Escuelajs. -->
+	<munit:test name="getPrice_whenEscProductExists_thenReturnCanonicalPrice">
+		<munit:behavior>
+			<munit-tools:mock-when processor="http:request">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-escuelajs"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[{ id: 7, title: 'Chair', price: 25 }]" mediaType="application/java"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit:set-event>
+				<munit:attributes value="#[{ uriParams: { providerAbv: 'ESC', externalId: '7' } }]"/>
+			</munit:set-event>
+		</munit:behavior>
+		<munit:execution>
+			<flow-ref name="price-get-flow"/>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[payload.externalId]" is="#[MunitTools::equalTo(7)]"/>
+			<munit-tools:assert-that expression="#[payload.providerAbv]" is="#[MunitTools::equalTo('ESC')]"/>
+			<munit-tools:assert-that expression="#[payload.price]" is="#[MunitTools::equalTo(25)]"/>
+			<munit-tools:verify-call processor="http:request" times="0">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-fakestore"/>
+				</munit-tools:with-attributes>
+			</munit-tools:verify-call>
+		</munit:validation>
+	</munit:test>
+
+	<!-- Propósito: reproducir lo que Fakestore hace de verdad con un id inexistente. Escenario: 200, cuerpo vacío,
+	     Content-Type application/json y Content-Length 0 (antes la app respondía 500 al leer ese cuerpo como JSON).
+	     Resultado esperado: error APP:PRODUCT_NOT_FOUND. -->
+	<munit:test name="getPrice_whenFakReturnsRealEmptyJsonResponse_thenProductNotFound" expectedErrorType="APP:PRODUCT_NOT_FOUND">
+		<munit:behavior>
+			<munit-tools:mock-when processor="http:request">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-fakestore"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#['']" mediaType="application/json"/>
+					<munit-tools:attributes value="#[{ statusCode: 200, headers: { 'content-length': '0', 'content-type': 'application/json; charset=utf-8' } }]"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit:set-event>
+				<munit:attributes value="#[{ uriParams: { providerAbv: 'FAK', externalId: '9999' } }]"/>
+			</munit:set-event>
+		</munit:behavior>
+		<munit:execution>
+			<flow-ref name="price-get-flow"/>
+		</munit:execution>
+	</munit:test>
+
+	<!-- Propósito: Fakestore sin encabezados de respuesta y con texto vacío. Escenario: cuerpo vacío sin Content-Length.
+	     Resultado esperado: error APP:PRODUCT_NOT_FOUND (rama isEmpty del or). -->
+	<munit:test name="getPrice_whenFakReturnsEmptyBody_thenProductNotFound" expectedErrorType="APP:PRODUCT_NOT_FOUND">
+		<munit:behavior>
+			<munit-tools:mock-when processor="http:request">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-fakestore"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#['']" mediaType="application/java"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit:set-event>
+				<munit:attributes value="#[{ uriParams: { providerAbv: 'FAK', externalId: '9999' } }]"/>
+			</munit:set-event>
+		</munit:behavior>
+		<munit:execution>
+			<flow-ref name="price-get-flow"/>
+		</munit:execution>
+	</munit:test>
+
+	<!-- Propósito: Escuelajs responde 400 para ids inexistentes. Escenario: HTTP:BAD_REQUEST.
+	     Resultado esperado: error APP:PRODUCT_NOT_FOUND. -->
+	<munit:test name="getPrice_whenEscReturnsBadRequest_thenProductNotFound" expectedErrorType="APP:PRODUCT_NOT_FOUND">
+		<munit:behavior>
+			<munit-tools:mock-when processor="http:request">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-escuelajs"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:error typeId="HTTP:BAD_REQUEST"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit:set-event>
+				<munit:attributes value="#[{ uriParams: { providerAbv: 'ESC', externalId: '9999' } }]"/>
+			</munit:set-event>
+		</munit:behavior>
+		<munit:execution>
+			<flow-ref name="price-get-flow"/>
+		</munit:execution>
+	</munit:test>
+
+	<!-- Propósito: la caída de un proveedor no se confunde con "no encontrado". Escenario: HTTP:CONNECTIVITY en Escuelajs.
+	     Resultado esperado: el error HTTP:CONNECTIVITY se propaga. -->
+	<munit:test name="getPrice_whenEscUnavailable_thenConnectivityErrorPropagates" expectedErrorType="HTTP:CONNECTIVITY">
+		<munit:behavior>
+			<munit-tools:mock-when processor="http:request">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-escuelajs"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:error typeId="HTTP:CONNECTIVITY"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit:set-event>
+				<munit:attributes value="#[{ uriParams: { providerAbv: 'ESC', externalId: '1' } }]"/>
+			</munit:set-event>
+		</munit:behavior>
+		<munit:execution>
+			<flow-ref name="price-get-flow"/>
+		</munit:execution>
+	</munit:test>
+
+	<!-- Propósito: un proveedor sin implementación sigue dando 501. Escenario: clave XXX (por el RAML no llega por HTTP, pero el flujo lo protege).
+	     Resultado esperado: APP:PROVIDER_NOT_SUPPORTED. -->
+	<munit:test name="getPrice_whenProviderIsUnknown_thenProviderNotSupported" expectedErrorType="APP:PROVIDER_NOT_SUPPORTED">
+		<munit:behavior>
+			<munit:set-event>
+				<munit:attributes value="#[{ uriParams: { providerAbv: 'XXX', externalId: '1' } }]"/>
+			</munit:set-event>
+		</munit:behavior>
+		<munit:execution>
+			<flow-ref name="price-get-flow"/>
+		</munit:execution>
+	</munit:test>
+
+	<!-- Propósito: BOR devuelve el Price canónico. Escenario: Borland responde GetArticleByIdResult con ArticleId, Name y Price.
+	     Resultado esperado: providerAbv BOR, name, price y currency USD, y se llama a Borland una vez. -->
+	<munit:test name="getPrice_whenBorArticleExists_thenReturnCanonicalPrice">
+		<munit:behavior>
+			<munit-tools:mock-when processor="wsc:consume">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="wsc-consume-borland-get-article"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-call flow="mock-bor-article-flow"/>
+			</munit-tools:mock-when>
+			<munit:set-event>
+				<munit:attributes value="#[{ uriParams: { providerAbv: 'BOR', externalId: '1' } }]"/>
+			</munit:set-event>
+		</munit:behavior>
+		<munit:execution>
+			<flow-ref name="price-get-flow"/>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[payload.externalId]" is="#[MunitTools::equalTo(1)]"/>
+			<munit-tools:assert-that expression="#[payload.providerAbv]" is="#[MunitTools::equalTo('BOR')]"/>
+			<munit-tools:assert-that expression="#[payload.name]" is="#[MunitTools::equalTo('Lord of the Rings - Fellowship of the Ring')]"/>
+			<munit-tools:assert-that expression="#[payload.price]" is="#[MunitTools::equalTo(34.99)]"/>
+			<munit-tools:assert-that expression="#[payload.currency]" is="#[MunitTools::equalTo('USD')]"/>
+			<munit-tools:verify-call processor="wsc:consume" times="1">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="wsc-consume-borland-get-article"/>
+				</munit-tools:with-attributes>
+			</munit-tools:verify-call>
+		</munit:validation>
+	</munit:test>
+
+	<!-- Propósito: BOR con un id desconocido. Escenario: Borland responde GetArticleByIdResponse vacío (sin GetArticleByIdResult).
+	     Resultado esperado: error APP:PRODUCT_NOT_FOUND. -->
+	<munit:test name="getPrice_whenBorArticleUnknown_thenProductNotFound" expectedErrorType="APP:PRODUCT_NOT_FOUND">
+		<munit:behavior>
+			<munit-tools:mock-when processor="wsc:consume">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="wsc-consume-borland-get-article"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-call flow="mock-bor-empty-flow"/>
+			</munit-tools:mock-when>
+			<munit:set-event>
+				<munit:attributes value="#[{ uriParams: { providerAbv: 'BOR', externalId: '99' } }]"/>
+			</munit:set-event>
+		</munit:behavior>
+		<munit:execution>
+			<flow-ref name="price-get-flow"/>
+		</munit:execution>
+	</munit:test>
+
+	<!-- Propósito: Borland no disponible. Escenario: el conector no logra enviar la petición (WSC:CANNOT_DISPATCH).
+	     Resultado esperado: el error WSC:CANNOT_DISPATCH sube para que el manejador global lo traduzca a 503. -->
+	<munit:test name="getPrice_whenBorUnavailable_thenPropagateCannotDispatch" expectedErrorType="WSC:CANNOT_DISPATCH">
+		<munit:behavior>
+			<munit-tools:mock-when processor="wsc:consume">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="wsc-consume-borland-get-article"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:error typeId="WSC:CANNOT_DISPATCH"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit:set-event>
+				<munit:attributes value="#[{ uriParams: { providerAbv: 'BOR', externalId: '1' } }]"/>
+			</munit:set-event>
+		</munit:behavior>
+		<munit:execution>
+			<flow-ref name="price-get-flow"/>
+		</munit:execution>
+	</munit:test>
+
+	<flow name="mock-bor-article-flow">
+		<ee:transform>
+			<ee:message>
+				<ee:set-payload><![CDATA[%dw 2.0
+output application/java
+---
+{ headers: {}, attachments: {}, body: read('<tem:GetArticleByIdResponse xmlns:tem="http://tempuri.org/"><tem:GetArticleByIdResult><tem:ArticleId>1</tem:ArticleId><tem:Name>Lord of the Rings - Fellowship of the Ring</tem:Name><tem:Price>34.99</tem:Price></tem:GetArticleByIdResult></tem:GetArticleByIdResponse>', 'application/xml') }]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+	</flow>
+
+	<flow name="mock-bor-empty-flow">
+		<ee:transform>
+			<ee:message>
+				<ee:set-payload><![CDATA[%dw 2.0
+output application/java
+---
+{ headers: {}, attachments: {}, body: read('<tem:GetArticleByIdResponse xmlns:tem="http://tempuri.org/"/>', 'application/xml') }]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+	</flow>
+
+
+</mule>

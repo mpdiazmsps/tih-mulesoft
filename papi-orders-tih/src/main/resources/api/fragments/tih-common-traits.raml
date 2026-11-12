@@ -1,0 +1,146 @@
+#%RAML 1.0 Library
+usage: |
+  Traits compartidos del proyecto TIH: seguridad (Client ID Enforcement), correlación y respuestas de error estándar.
+  Cada método declara solo los errores que realmente puede devolver, por ejemplo:
+  is: [ traits.secured, traits.validated, traits.retryable ]
+
+uses:
+  types: tih-common-types.raml
+
+traits:
+  secured:
+    description: |
+      Requiere credenciales de aplicación (política Client ID Enforcement de API Manager) y propaga x-correlation-id.
+      El 401 lo devuelve la política, no la implementación.
+    headers:
+      client_id:
+        description: Client ID de la aplicación cliente registrada en Exchange.
+        type: string
+        example: 0123456789abcdef0123456789abcdef
+      client_secret:
+        description: Client secret de la aplicación cliente.
+        type: string
+        example: fedcba9876543210fedcba9876543210
+      x-correlation-id:
+        description: Identificador de correlación. Si no se envía, la API lo genera y lo devuelve en el error.
+        type: string
+        required: false
+        example: 0b6f2f0e-4a0c-4d25-9a4c-3d9e6a7b1c2d
+    responses:
+      401:
+        description: Credenciales ausentes o inválidas.
+        body:
+          application/json:
+            type: types.ErrorResponse
+            example:
+              code: UNAUTHORIZED
+              message: Invalid client id or secret
+              timestamp: 2026-10-07T16:35:00Z
+              retryable: false
+      500:
+        description: Error inesperado.
+        body:
+          application/json:
+            type: types.ErrorResponse
+            example:
+              code: INTERNAL_ERROR
+              message: Error inesperado
+              correlationId: 0b6f2f0e-4a0c-4d25-9a4c-3d9e6a7b1c2d
+              timestamp: 2026-10-07T16:35:00Z
+              retryable: false
+
+  validated:
+    description: La petición puede ser rechazada por datos inválidos.
+    responses:
+      400:
+        description: Datos inválidos o faltantes.
+        body:
+          application/json:
+            type: types.ErrorResponse
+            example:
+              code: VALIDATION_ERROR
+              message: Se requiere email o phone
+              correlationId: 0b6f2f0e-4a0c-4d25-9a4c-3d9e6a7b1c2d
+              timestamp: 2026-10-07T16:35:00Z
+              retryable: false
+              details: [email, phone]
+
+  not-found:
+    description: El recurso solicitado puede no existir.
+    responses:
+      404:
+        description: Recurso no encontrado.
+        body:
+          application/json:
+            type: types.ErrorResponse
+            example:
+              code: CUSTOMER_NOT_FOUND
+              message: El cliente no está registrado
+              correlationId: 0b6f2f0e-4a0c-4d25-9a4c-3d9e6a7b1c2d
+              timestamp: 2026-10-07T16:35:00Z
+              retryable: false
+
+  conflict:
+    description: La petición puede chocar con el estado actual del recurso.
+    responses:
+      409:
+        description: Conflicto con el estado actual.
+        body:
+          application/json:
+            type: types.ErrorResponse
+            example:
+              code: CUSTOMER_ALREADY_EXISTS
+              message: Ya existe un cliente con ese email o teléfono
+              correlationId: 0b6f2f0e-4a0c-4d25-9a4c-3d9e6a7b1c2d
+              timestamp: 2026-10-07T16:35:00Z
+              retryable: false
+
+  not-implemented:
+    description: La operación puede no estar soportada todavía.
+    responses:
+      501:
+        description: No soportado por ahora.
+        body:
+          application/json:
+            type: types.ErrorResponse
+            example:
+              code: PROVIDER_NOT_SUPPORTED
+              message: El proveedor BOR no está soportado
+              correlationId: 0b6f2f0e-4a0c-4d25-9a4c-3d9e6a7b1c2d
+              timestamp: 2026-10-07T16:35:00Z
+              retryable: false
+
+  bad-gateway:
+    description: Un sistema externo puede responder con error.
+    responses:
+      502:
+        description: Error en un sistema externo (proveedor de precios, MagicBell).
+        body:
+          application/json:
+            type: types.ErrorResponse
+            example:
+              code: PROVIDER_ERROR
+              message: El proveedor respondió con error
+              correlationId: 0b6f2f0e-4a0c-4d25-9a4c-3d9e6a7b1c2d
+              timestamp: 2026-10-07T16:35:00Z
+              retryable: true
+
+  retryable:
+    description: Un backend puede no estar disponible. El consumidor puede reintentar.
+    responses:
+      503:
+        description: Backend no disponible (Oracle, SFTP, RabbitMQ). Reintentar después.
+        headers:
+          Retry-After:
+            description: Segundos sugeridos antes de reintentar.
+            type: integer
+            example: 30
+        body:
+          application/json:
+            type: types.ErrorResponse
+            example:
+              code: SERVICE_UNAVAILABLE
+              message: Servicio temporalmente no disponible, intenta de nuevo
+              correlationId: 0b6f2f0e-4a0c-4d25-9a4c-3d9e6a7b1c2d
+              timestamp: 2026-10-07T16:35:00Z
+              retryable: true

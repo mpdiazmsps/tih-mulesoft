@@ -1,0 +1,48 @@
+#%RAML 1.0
+title: xapi-online-store-tih
+version: v1
+baseUri: http://localhost:8080/api/v1/online-store
+protocols: [HTTP]
+mediaType: application/json
+description: |
+  Experience API de la tienda en línea. Es el único punto de entrada para el consumidor externo (la tienda).
+  Aplica Client ID Enforcement y expone el contrato del canal. No contiene lógica de negocio:
+  delega en papi-customers-tih y papi-orders-tih.
+
+uses:
+  types: fragments/tih-common-types.raml
+  traits: fragments/tih-common-traits.raml
+
+/customers:
+  post:
+    displayName: Registrar cliente
+    description: |
+      Registra un cliente en la base de datos core antes de que pueda crear pedidos.
+      Se requiere email o phone. Si falla el registro, la respuesta indica si se puede reintentar (retryable).
+    is: [traits.secured, traits.validated, traits.conflict, traits.retryable]
+    body:
+      application/json:
+        type: types.CustomerRequest
+    responses:
+      201:
+        description: Cliente registrado.
+        body:
+          application/json:
+            type: types.CustomerCreated
+
+/orders:
+  post:
+    displayName: Crear pedido
+    description: |
+      Recibe una solicitud de pedido de un cliente registrado y devuelve su identificador.
+      El pedido se procesa de forma asíncrona: queda depositado como CSV y se cotiza y registra después.
+    is: [traits.secured, traits.validated, traits.not-found, traits.retryable]
+    body:
+      application/json:
+        type: types.OrderRequest
+    responses:
+      201:
+        description: Pedido recibido.
+        body:
+          application/json:
+            type: types.OrderReceived

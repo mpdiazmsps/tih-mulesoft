@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:db="http://www.mulesoft.org/schema/mule/db"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/db http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd
+		http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+	<flow name="customers-search-flow"
+		doc:name="customers-search-flow"
+		doc:description="Busca clientes por email o teléfono (al menos uno es obligatorio)">
+		<logger level="INFO"
+			message="#['INIT - Search customers SAPI, timeExecute: ' ++ (now() as String) ++ ' correlationId: ' ++ correlationId]"
+			doc:name="logger-search-customers-start"
+			doc:description="Registra el inicio de la búsqueda de clientes"/>
+		<choice doc:name="choice-has-search-filter"
+			doc:description="Rechaza la búsqueda si no llegó ni email ni phone">
+			<when expression="#[isEmpty(attributes.queryParams.email default '') and isEmpty(attributes.queryParams.phone default '')]"
+				doc:description="Se cumple cuando la petición no trae ningún filtro de búsqueda">
+				<raise-error type="APP:VALIDATION_ERROR"
+					description="Se requiere al menos un filtro: email o phone"
+					doc:name="raise-missing-search-filter"
+					doc:description="Eleva el error de validación que se responde como 400"/>
+			</when>
+		</choice>
+		<!-- Oracle trata la cadena vacía como NULL, por eso el filtro ausente se manda como "" y nunca coincide.
+		     El email se pasa a minúsculas aquí: con LOWER(:email) el driver enlaza el parámetro como CLOB (ORA-22848). -->
+		<db:select config-ref="oracle-core-db-config"
+			doc:name="db-select-customers-by-contact"
+			doc:description="Busca por email (sin distinguir mayúsculas) o por teléfono exacto">
+			<db:sql><![CDATA[SELECT ID, CLIENT_NAME, CLIENT_LAST_NAME, CLIENT_EMAIL, CLIENT_PHONE, TO_CHAR(CREATION_DATE, 'YYYYMMDDHH24MISSFF3') AS CREATION_DATE FROM CUSTOMERS WHERE (CLIENT_EMAIL IS NOT NULL AND LOWER(CLIENT_EMAIL) = :email) OR (CLIENT_PHONE IS NOT NULL AND CLIENT_PHONE = :phone)]]></db:sql>
+			<db:input-parameters><![CDATA[#[{ email: lower(attributes.queryParams.email default ""), phone: attributes.queryParams.phone default "" }]]]></db:input-parameters>
+		</db:select>
+		<ee:transform doc:name="transform-customer-list-response"
+			doc:description="Arma la lista de clientes del contrato (puede estar vacía)">
+			<ee:message doc:description="Define el payload de la respuesta con la lista de clientes">
+				<ee:set-payload resource="dataweave/mapping-customer-list-response.dwl"
+					doc:description="Convierte las filas de CUSTOMERS en el objeto customers del contrato, omitiendo los campos NULL"/>
+			</ee:message>
+		</ee:transform>
+		<logger level="INFO"
+			message="#[output application/java --- 'END - Search customers SAPI, found: ' ++ (sizeOf(payload.customers) as String) ++ ' correlationId: ' ++ correlationId]"
+			doc:name="logger-search-customers-end"
+			doc:description="Registra el fin de la búsqueda con el número de coincidencias"/>
+	</flow>
+
+</mule>

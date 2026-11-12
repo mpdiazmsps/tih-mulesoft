@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns:munit="http://www.mulesoft.org/schema/mule/munit"
+	xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+		http://www.mulesoft.org/schema/mule/munit http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+		http://www.mulesoft.org/schema/mule/munit-tools http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd">
+
+	<munit:config name="orders-get-by-id-flow-test.xml"/>
+
+	<!-- Propósito: GET /orders/{orderId} agrupa las líneas de ORDERS en un solo Order con su total.
+	     Escenario: Oracle (mock) devuelve 2 líneas del mismo pedido. Resultado esperado: Order con 2 items y total 2609.95. -->
+	<munit:test name="ordersGetById_whenOrderExists_thenReturnOrderWithTotal"
+		description="Devuelve el pedido agrupado y su total">
+		<munit:behavior>
+			<munit-tools:mock-when processor="db:select">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="db-select-order-lines-by-id"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/java --- readUrl('classpath://payloads/order-rows.json', 'application/json')]"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+		</munit:behavior>
+		<munit:execution>
+			<munit:set-event>
+				<munit:attributes value="#[{ uriParams: { orderId: '9d8c7b6a-5f4e-4d3c-8b2a-1f0e9d8c7b6a' } }]"/>
+			</munit:set-event>
+			<flow-ref name="get:\orders\(orderId):sapi-oracle-core-tih-config"/>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[payload.id]" is="#[MunitTools::equalTo('9d8c7b6a-5f4e-4d3c-8b2a-1f0e9d8c7b6a')]"/>
+			<munit-tools:assert-that expression="#[payload.customerId]" is="#[MunitTools::equalTo('3f2b8c1e-7a4d-4e5b-9c0a-1d2e3f4a5b6c')]"/>
+			<munit-tools:assert-that expression="#[sizeOf(payload.items)]" is="#[MunitTools::equalTo(2)]"/>
+			<munit-tools:assert-that expression="#[payload.total as String]" is="#[MunitTools::equalTo('2609.95')]"/>
+			<munit-tools:assert-that expression="#[payload.creationDate]" is="#[MunitTools::equalTo('2026-10-07T16:40:00.123Z')]"/>
+		</munit:validation>
+	</munit:test>
+
+	<!-- Propósito: un pedido inexistente se traduce en 404.
+	     Escenario: Oracle (mock) devuelve cero filas. Resultado esperado: APP:ORDER_NOT_FOUND. -->
+	<munit:test name="ordersGetById_whenOrderDoesNotExist_thenRaiseOrderNotFound"
+		description="Eleva APP:ORDER_NOT_FOUND cuando no hay líneas"
+		expectedErrorType="APP:ORDER_NOT_FOUND">
+		<munit:behavior>
+			<munit-tools:mock-when processor="db:select">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="db-select-order-lines-by-id"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/java --- []]"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+		</munit:behavior>
+		<munit:execution>
+			<munit:set-event>
+				<munit:attributes value="#[{ uriParams: { orderId: '00000000-0000-0000-0000-000000000000' } }]"/>
+			</munit:set-event>
+			<flow-ref name="get:\orders\(orderId):sapi-oracle-core-tih-config"/>
+		</munit:execution>
+	</munit:test>
+
+</mule>

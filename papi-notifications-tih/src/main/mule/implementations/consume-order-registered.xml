@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:amqp="http://www.mulesoft.org/schema/mule/amqp"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/amqp http://www.mulesoft.org/schema/mule/amqp/current/mule-amqp.xsd
+		http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+	<!-- Disparador principal de la PAPI: consume orders.registered.q con ACK manual. La lógica vive en
+	     consume-order-registered-subflow para poder probarla sin un broker. -->
+	<flow name="consume-order-registered-flow"
+		doc:name="consume-order-registered-flow"
+		doc:description="Escucha la cola orders.registered.q de RabbitMQ con ACK manual y delega el procesamiento del evento">
+		<amqp:listener config-ref="rabbitmq-amqp-config" queueName="${rabbitmq.queue}" ackMode="MANUAL"
+			doc:name="Listener orders.registered.q"
+			doc:description="Recibe un evento order.registered; el mensaje queda pendiente hasta que se haga ACK o reject"/>
+		<set-variable variableName="ackId" value="#[attributes.ackId]"
+			doc:name="set-ack-id"
+			doc:description="Guarda el delivery tag porque las llamadas HTTP reemplazan los atributos del mensaje"/>
+		<flow-ref name="consume-order-registered-subflow" doc:name="consume-order-registered-subflow"
+			doc:description="Procesa el evento con reintentos y hace ACK o reject según el resultado"/>
+	</flow>
+
+	<sub-flow name="consume-order-registered-subflow"
+		doc:name="consume-order-registered-subflow"
+		doc:description="Procesa el evento: ACK si se notificó u omitió; reject sin requeue (DLQ) si el error es permanente o se agotan los reintentos">
+		<set-variable variableName="permanentFailure" value="#[false]"
+			doc:name="set-permanent-failure"
+			doc:description="Se pone en true cuando el error no tiene sentido reintentarlo (cliente inexistente, MagicBell rechaza)"/>
+		<try doc:name="Try"
+			doc:description="Cualquier error que llegue hasta aquí rechaza el mensaje hacia la DLQ">
+			<ee:transform doc:name="transform-parse-event"
+				doc:description="Convierte el cuerpo del mensaje en el objeto del evento order.registered">
+				<ee:message doc:description="Define el payload como objeto Java para el flujo de proceso">
+					<ee:set-payload doc:description="Convierte el cuerpo JSON del mensaje en objeto; si el payload ya llega como objeto lo deja igual"><![CDATA[%dw 2.0
+output application/java
+---
+if ((payload is String) or (payload is Binary)) read(payload, "application/json") else payload]]></ee:set-payload>
+				</ee:message>
+			</ee:transform>
+			<until-successful maxRetries="${rabbitmq.retryMax}" millisBetweenRetries="${rabbitmq.retryMillis}"
+				doc:name="Until Successful"
+				doc:description="Reintenta los errores transitorios (503, 5xx, timeout) antes de rendirse">
+				<try doc:name="Try process"
+					doc:description="Los errores permanentes no se reintentan: se marcan y se deja que el flujo continúe">
+					<flow-ref name="notifications-process-order-registered-flow" doc:name="process-order-registered"
+						doc:description="Obtiene el cliente y envía el correo (misma lógica que el reenvío manual)"/>
+					<error-handler doc:description="Marca como permanentes los errores que no se reintentan (cliente inexistente, MagicBell rechaza) y deja continuar el flujo">
+						<on-error-continue type="APP:CUSTOMER_NOT_FOUND, HTTP:UNAUTHORIZED, HTTP:FORBIDDEN, HTTP:BAD_REQUEST, HTTP:NOT_FOUND, APP:NOTIFICATION_REJECTED, HTTP:CLIENT_SECURITY, HTTP:SECURITY"
+							doc:name="On Error Continue"
+							doc:description="Error permanente: reintentar no ayuda, se marca para rechazar el mensaje">
+							<logger level="ERROR"
+								message="#['ERROR - Permanent failure, message will be rejected: ' ++ (error.errorType.namespace default 'MULE') ++ ':' ++ (error.errorType.identifier default 'ANY') ++ ' correlationId: ' ++ correlationId]"
+								doc:name="logger-permanent-failure"
+								doc:description="Registra el error permanente y el correlationId"/>
+							<set-variable variableName="permanentFailure" value="#[true]"
+								doc:name="set-permanent-failure-true"
+								doc:description="Marca el mensaje para rechazo inmediato"/>
+						</on-error-continue>
+					</error-handler>
+				</try>
+			</until-successful>
+			<choice doc:name="choice-permanent-failure"
+				doc:description="Rechaza el mensaje si hubo un error permanente; si no, lo confirma">
+				<when expression="#[vars.permanentFailure]"
+					doc:description="Error permanente: el mensaje va a la DLQ sin reintentar">
+					<amqp:reject ackId="#[vars.ackId]" requeue="false"
+						doc:name="Reject (DLQ)"
+						doc:description="Rechaza sin requeue: el dead-letter exchange lo manda a orders.registered.dlq"/>
+				</when>
+				<otherwise doc:description="El correo se envió o se omitió por falta de email">
+					<amqp:ack ackId="#[vars.ackId]"
+						doc:name="ACK"
+						doc:description="Confirma el mensaje: sale de la cola"/>
+				</otherwise>
+			</choice>
+			<error-handler doc:description="Si el evento es ilegible o se agotaron los reintentos, lo rechaza sin requeue para que llegue a la DLQ">
+				<on-error-continue type="ANY"
+					doc:name="On Error Continue"
+					doc:description="Reintentos agotados o evento ilegible: se rechaza sin requeue y el mensaje llega a la DLQ">
+					<logger level="ERROR"
+						message="#['ERROR - Retries exhausted or unreadable event, rejecting to DLQ: ' ++ (error.errorType.namespace default 'MULE') ++ ':' ++ (error.errorType.identifier default 'ANY') ++ ' correlationId: ' ++ correlationId]"
+						doc:name="logger-reject-to-dlq"
+						doc:description="Registra por qué el mensaje se manda a la DLQ"/>
+					<amqp:reject ackId="#[vars.ackId]" requeue="false"
+						doc:name="Reject (DLQ) after error"
+						doc:description="Rechaza sin requeue para que el mensaje llegue a la DLQ"/>
+				</on-error-continue>
+			</error-handler>
+		</try>
+	</sub-flow>
+
+</mule>

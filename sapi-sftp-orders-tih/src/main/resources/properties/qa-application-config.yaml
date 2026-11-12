@@ -1,0 +1,22 @@
+# Ambiente QA: copia inicial de dev.
+# Cambiar hosts, puertos y demas valores antes de usar este ambiente.
+# Configuración NO sensible del ambiente local.
+# Usuario y contraseña del SFTP van en qa-secure-application-config.yaml.
+http:
+  listener:
+    host: "0.0.0.0"
+    port: "8092"
+    basePath: "/api/v1/sftp/orders"
+
+sftp:
+  host: "localhost"
+  port: "2222"
+  # Carpeta raíz de pedidos (relativa a la raíz del usuario SFTP): pending, processed y error
+  baseDir: "/orders"
+  reconnection:
+    frequencyMillis: "2000"
+    attempts: "3"
+
+# Segundos que se sugieren al consumidor en Retry-After cuando el SFTP no está disponible
+error:
+  retryAfterSeconds: "30"

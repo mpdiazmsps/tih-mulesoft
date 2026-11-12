@@ -1,0 +1,168 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:wsc="http://www.mulesoft.org/schema/mule/wsc"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+		http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+		http://www.mulesoft.org/schema/mule/wsc http://www.mulesoft.org/schema/mule/wsc/current/mule-wsc.xsd">
+
+	<flow name="price-get-flow"
+		doc:name="price-get-flow"
+		doc:description="Consulta el precio de un artículo al proveedor indicado y lo devuelve en el modelo canónico Price">
+		<logger level="INFO"
+			message="#[output application/java --- 'INIT - Get price SAPI, provider: ' ++ attributes.uriParams.providerAbv ++ ' externalId: ' ++ attributes.uriParams.externalId ++ ' correlationId: ' ++ correlationId]"
+			doc:name="logger-get-price-start"
+			doc:description="Registra el inicio de la consulta con el proveedor y el id externo"/>
+		<!-- Los conectores reemplazan attributes: proveedor e id se guardan en variables antes de llamar al proveedor. -->
+		<ee:transform doc:name="transform-price-variables"
+			doc:description="Guarda proveedor e id externo porque http:request reemplaza los atributos del mensaje">
+			<ee:message doc:description="Sin cambios al payload; solo se calculan providerAbv y externalId"/>
+			<ee:variables>
+				<ee:set-variable variableName="providerAbv"
+					doc:description="Clave del proveedor recibida en la URL (FAK, ESC o BOR)"><![CDATA[%dw 2.0
+output application/java
+---
+attributes.uriParams.providerAbv]]></ee:set-variable>
+				<ee:set-variable variableName="externalId"
+					doc:description="Identificador del artículo en el proveedor, recibido en la URL"><![CDATA[%dw 2.0
+output application/java
+---
+attributes.uriParams.externalId]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+		<choice doc:name="choice-provider"
+			doc:description="Elige el proveedor según la clave: FAK y ESC por REST y BOR (Borland) por SOAP">
+			<when expression="#[vars.providerAbv == 'FAK']"
+				doc:description="Fakestore: API REST pública">
+				<flow-ref name="price-fakestore-subflow" doc:name="price-fakestore-subflow"
+					doc:description="Consulta el precio en Fakestore"/>
+			</when>
+			<when expression="#[vars.providerAbv == 'ESC']"
+				doc:description="Escuelajs: API REST pública">
+				<flow-ref name="price-escuelajs-subflow" doc:name="price-escuelajs-subflow"
+					doc:description="Consulta el precio en Escuelajs"/>
+			</when>
+			<when expression="#[vars.providerAbv == 'BOR']"
+				doc:description="Borland: servicio SOAP OrderService (en local, el mock de SoapUI)">
+				<flow-ref name="price-borland-subflow" doc:name="price-borland-subflow"
+					doc:description="Consulta el precio en Borland por SOAP"/>
+			</when>
+			<otherwise doc:description="Proveedor sin implementación (no debería llegar: el RAML solo admite FAK, ESC y BOR)">
+				<raise-error type="APP:PROVIDER_NOT_SUPPORTED"
+					description="El proveedor no está soportado por ahora"
+					doc:name="raise-provider-not-supported"
+					doc:description="Eleva el error de negocio que se responde como 501"/>
+			</otherwise>
+		</choice>
+		<ee:transform doc:name="transform-canonical-price-response"
+			doc:description="Convierte el producto del proveedor en el Price canónico del contrato">
+			<ee:message doc:description="Define el payload de la respuesta con el precio">
+				<ee:set-payload resource="dataweave/mapping-price-response.dwl"
+					doc:description="Arma externalId, providerAbv, name, price y currency a partir de title y price del proveedor"/>
+			</ee:message>
+		</ee:transform>
+		<logger level="INFO"
+			message="#[output application/java --- 'END - Get price SAPI, provider: ' ++ vars.providerAbv ++ ' externalId: ' ++ vars.externalId ++ ' correlationId: ' ++ correlationId]"
+			doc:name="logger-get-price-end"
+			doc:description="Registra el fin de la consulta"/>
+	</flow>
+
+	<sub-flow name="price-fakestore-subflow"
+		doc:name="price-fakestore-subflow"
+		doc:description="Consulta GET /products/{id} en Fakestore. Para un id inexistente Fakestore responde 200 sin cuerpo">
+		<http:request method="GET" config-ref="fakestore-http-config" path="#[p('provider.fak.basePath') ++ '/' ++ vars.externalId]"
+			doc:name="http-request-fakestore"
+			doc:description="Llama a Fakestore y espera un producto JSON con title y price">
+			<http:headers>#[{ Accept: 'application/json' }]</http:headers>
+		</http:request>
+		<!-- Para un id inexistente Fakestore responde 200, Content-Length 0 y Content-Type application/json. Con ese tipo,
+		     isEmpty(payload) intenta leer el cuerpo vacío como JSON y falla (500), así que primero se consulta el
+		     encabezado: el "or" no evalúa isEmpty cuando Content-Length ya es 0. -->
+		<choice doc:name="choice-fakestore-found"
+			doc:description="Responde 404 si Fakestore devolvió un cuerpo vacío">
+			<when expression="#[(attributes.headers.'content-length' default '') == '0' or isEmpty(payload)]"
+				doc:description="Se cumple cuando Fakestore responde sin cuerpo (Content-Length 0): el proveedor no conoce el artículo">
+				<raise-error type="APP:PRODUCT_NOT_FOUND"
+					description="El proveedor no conoce el artículo solicitado"
+					doc:name="raise-fakestore-product-not-found"
+					doc:description="Eleva el error de negocio que se responde como 404"/>
+			</when>
+		</choice>
+	</sub-flow>
+
+	<sub-flow name="price-escuelajs-subflow"
+		doc:name="price-escuelajs-subflow"
+		doc:description="Consulta GET /api/v1/products/{id} en Escuelajs. Para un id inexistente Escuelajs responde 400">
+		<try doc:name="Try"
+			doc:description="Traduce el 400 de Escuelajs (artículo inexistente) en un error de negocio">
+			<http:request method="GET" config-ref="escuelajs-http-config" path="#[p('provider.esc.basePath') ++ '/' ++ vars.externalId]"
+				doc:name="http-request-escuelajs"
+				doc:description="Llama a Escuelajs y espera un producto JSON con title y price">
+				<http:headers>#[{ Accept: 'application/json' }]</http:headers>
+			</http:request>
+			<error-handler doc:description="Traduce el 400 o 404 de Escuelajs en el error de negocio PRODUCT_NOT_FOUND; otros errores siguen su camino">
+				<on-error-propagate type="HTTP:BAD_REQUEST, HTTP:NOT_FOUND"
+					doc:name="On Error Propagate"
+					doc:description="Escuelajs responde 400 cuando el id no existe: se informa como artículo no encontrado">
+					<logger level="WARN"
+						message="#[output application/java --- 'WARN - Escuelajs does not know externalId ' ++ vars.externalId ++ ' correlationId: ' ++ correlationId]"
+						doc:name="logger-escuelajs-product-not-found"
+						doc:description="Registra el artículo desconocido"/>
+					<raise-error type="APP:PRODUCT_NOT_FOUND"
+						description="El proveedor no conoce el artículo solicitado"
+						doc:name="raise-escuelajs-product-not-found"
+						doc:description="Eleva el error de negocio que se responde como 404"/>
+				</on-error-propagate>
+			</error-handler>
+		</try>
+	</sub-flow>
+
+	<sub-flow name="price-borland-subflow"
+		doc:name="price-borland-subflow"
+		doc:description="Consulta GetArticleById en el servicio SOAP de Borland. Para un id inexistente la respuesta viene sin GetArticleByIdResult">
+		<ee:transform doc:name="transform-borland-request"
+			doc:description="Arma el cuerpo SOAP GetArticleById con el ArticleId numérico">
+			<ee:message doc:description="Define el cuerpo XML que se envía al servicio">
+				<ee:set-payload doc:description="Elemento GetArticleById del espacio de nombres http://tempuri.org/ con el ArticleId"><![CDATA[%dw 2.0
+output application/xml
+ns tem http://tempuri.org/
+---
+{ tem#GetArticleById: { tem#ArticleId: vars.externalId as Number } }]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<wsc:consume config-ref="borland-wsc-config" operation="GetArticleById"
+			doc:name="wsc-consume-borland-get-article"
+			doc:description="Llama a la operación GetArticleById de Borland (SOAP 1.1)">
+			<wsc:message>
+				<wsc:body>#[payload]</wsc:body>
+			</wsc:message>
+		</wsc:consume>
+		<ee:transform doc:name="transform-borland-article"
+			doc:description="Extrae Name y Price de GetArticleByIdResult como title y price; sin resultado el artículo no existe (null)">
+			<ee:message doc:description="Define el payload con el artículo en el formato común de los proveedores">
+				<ee:set-payload doc:description="Devuelve title y price, o null si Borland respondió sin GetArticleByIdResult"><![CDATA[%dw 2.0
+output application/java
+ns tem http://tempuri.org/
+var result = payload.body.tem#GetArticleByIdResponse.tem#GetArticleByIdResult
+---
+if (result == null) null else { title: result.tem#Name as String, price: result.tem#Price as Number }]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<choice doc:name="choice-borland-found"
+			doc:description="Responde 404 si Borland no devolvió el artículo">
+			<when expression="#[payload == null]"
+				doc:description="Se cumple cuando Borland respondió sin GetArticleByIdResult: el proveedor no conoce el artículo">
+				<raise-error type="APP:PRODUCT_NOT_FOUND"
+					description="El proveedor no conoce el artículo solicitado"
+					doc:name="raise-borland-product-not-found"
+					doc:description="Eleva el error de negocio que se responde como 404"/>
+			</when>
+		</choice>
+	</sub-flow>
+
+</mule>

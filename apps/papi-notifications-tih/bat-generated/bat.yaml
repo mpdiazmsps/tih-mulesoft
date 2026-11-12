@@ -1,0 +1,14 @@
+suite:
+  name: "papi-notifications-tih BAT (generated from source)"
+files:
+  - file: tests/notify-customer-without-email-skipped.dwl
+  - file: tests/notify-customer-not-found.dwl
+  - file: tests/notify-invalid-event-type.dwl
+  - file: tests/notify-missing-items.dwl
+  - file: tests/notify-method-not-allowed.dwl
+  - file: tests/missing-client-headers.dwl
+reporters:
+  - type: HTML
+    outFile: reports/bat-report.html
+  - type: JSON
+    outFile: reports/bat-report.json

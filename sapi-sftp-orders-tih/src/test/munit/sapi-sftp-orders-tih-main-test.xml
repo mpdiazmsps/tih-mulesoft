@@ -1,0 +1,289 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:sftp="http://www.mulesoft.org/schema/mule/sftp"
+	xmlns:munit="http://www.mulesoft.org/schema/mule/munit"
+	xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+		http://www.mulesoft.org/schema/mule/sftp http://www.mulesoft.org/schema/mule/sftp/current/mule-sftp.xsd
+		http://www.mulesoft.org/schema/mule/munit http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+		http://www.mulesoft.org/schema/mule/munit-tools http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd">
+
+	<!-- Pruebas de integración HTTP: se habilita el listener real (puerto 8092) y se invoca la API por HTTP contra el SFTP
+	     local (Rebex, puerto 2222), que debe estar corriendo. Se usa siempre el archivo it-http-test.csv, que se borra
+	     de las tres carpetas antes y después de cada prueba. -->
+	<munit:config name="sapi-sftp-orders-tih-main-test.xml"/>
+
+	<http:request-config name="test-api-client" doc:name="HTTP Request configuration">
+		<http:request-connection host="localhost" port="8092"/>
+	</http:request-config>
+
+	<munit:before-test name="main-clean-before">
+		<flow-ref name="test-clean-http-file-flow"/>
+	</munit:before-test>
+	<munit:after-test name="main-clean-after">
+		<flow-ref name="test-clean-http-file-flow"/>
+	</munit:after-test>
+
+	<!-- MUnit inicializa los flujos de forma perezosa y APIkit arma su tabla de rutas con los ya inicializados:
+	     se invocan una vez los 4 flujos de interfaz. Sin atributos ni payload fallan antes de llegar al SFTP,
+	     salvo el listado, que solo lee. -->
+	<munit:before-suite name="main-warm-up">
+		<try><flow-ref name="get:\files:sapi-sftp-orders-tih-config"/><error-handler><on-error-continue/></error-handler></try>
+		<try><flow-ref name="put:\files\(fileName):text\csv:sapi-sftp-orders-tih-config"/><error-handler><on-error-continue/></error-handler></try>
+		<try><flow-ref name="get:\files\(fileName):sapi-sftp-orders-tih-config"/><error-handler><on-error-continue/></error-handler></try>
+		<try><flow-ref name="post:\files\(fileName)\move:application\json:sapi-sftp-orders-tih-config"/><error-handler><on-error-continue/></error-handler></try>
+	</munit:before-suite>
+
+	<flow name="test-clean-http-file-flow">
+		<try><sftp:delete config-ref="sftp-orders-config" path="/orders/pending/it-http-test.csv"/><error-handler><on-error-continue/></error-handler></try>
+		<try><sftp:delete config-ref="sftp-orders-config" path="/orders/pending/it-http-test.csv.tmp"/><error-handler><on-error-continue/></error-handler></try>
+		<try><sftp:delete config-ref="sftp-orders-config" path="/orders/processed/it-http-test.csv"/><error-handler><on-error-continue/></error-handler></try>
+		<try><sftp:delete config-ref="sftp-orders-config" path="/orders/error/it-http-test.csv"/><error-handler><on-error-continue/></error-handler></try>
+	</flow>
+
+	<flow name="test-http-put-flow">
+		<http:request method="PUT" config-ref="test-api-client" path="/api/v1/sftp/orders/files/it-http-test.csv">
+			<http:body><![CDATA[#[output text/plain --- 'item,qty
+abc,1
+']]]></http:body>
+			<http:headers><![CDATA[#[{ client_id: 'test-id', client_secret: 'test-secret', 'Content-Type': 'text/csv' }]]]></http:headers>
+			<http:response-validator>
+				<http:success-status-code-validator values="0..599"/>
+			</http:response-validator>
+		</http:request>
+	</flow>
+
+	<!-- Propósito: PUT /files/{fileName} responde 201 con el FileInfo. Escenario: archivo nuevo por HTTP.
+	     Resultado esperado: 201, fileName y status pending. -->
+	<munit:test name="apiPutFile_whenNewFile_thenReturn201">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="sapi-sftp-orders-tih-main"/>
+		</munit:enable-flow-sources>
+		<munit:execution>
+			<flow-ref name="test-http-put-flow"/>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(201)]"/>
+			<munit-tools:assert-that expression="#[payload.fileName]" is="#[MunitTools::equalTo('it-http-test.csv')]"/>
+			<munit-tools:assert-that expression="#[payload.status]" is="#[MunitTools::equalTo('pending')]"/>
+			<munit-tools:assert-that expression="#[payload.size]" is="#[MunitTools::equalTo(15)]"/>
+		</munit:validation>
+	</munit:test>
+
+	<!-- Propósito: no se sobrescribe un archivo existente. Escenario: se deposita dos veces el mismo archivo.
+	     Resultado esperado: 409 FILE_ALREADY_EXISTS en el segundo intento. -->
+	<munit:test name="apiPutFile_whenFileAlreadyExists_thenReturn409">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="sapi-sftp-orders-tih-main"/>
+		</munit:enable-flow-sources>
+		<munit:execution>
+			<flow-ref name="test-http-put-flow"/>
+			<flow-ref name="test-http-put-flow"/>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(409)]"/>
+			<munit-tools:assert-that expression="#[payload.code]" is="#[MunitTools::equalTo('FILE_ALREADY_EXISTS')]"/>
+			<munit-tools:assert-that expression="#[payload.retryable]" is="#[MunitTools::equalTo(false)]"/>
+		</munit:validation>
+	</munit:test>
+
+	<!-- Propósito: GET /files/{fileName} devuelve el CSV con Content-Type text/csv.
+	     Escenario: archivo depositado antes por HTTP. Resultado esperado: 200, text/csv y contenido idéntico. -->
+	<munit:test name="apiGetFile_whenFileExists_thenReturn200AsCsv">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="sapi-sftp-orders-tih-main"/>
+		</munit:enable-flow-sources>
+		<munit:execution>
+			<flow-ref name="test-http-put-flow"/>
+			<http:request method="GET" config-ref="test-api-client" path="/api/v1/sftp/orders/files/it-http-test.csv">
+				<http:headers><![CDATA[#[{ client_id: 'test-id', client_secret: 'test-secret' }]]]></http:headers>
+				<http:response-validator>
+					<http:success-status-code-validator values="0..599"/>
+				</http:response-validator>
+			</http:request>
+			<set-variable variableName="contentType" value="#[attributes.headers.'content-type']"/>
+			<set-variable variableName="statusCode" value="#[attributes.statusCode]"/>
+			<set-payload value="#[payload]" mimeType="text/plain"/>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[vars.statusCode]" is="#[MunitTools::equalTo(200)]"/>
+			<munit-tools:assert-that expression="#[vars.contentType]" is="#[MunitTools::containsString('text/csv')]"/>
+			<munit-tools:assert-that expression="#[payload as String]" is="#[MunitTools::equalTo('item,qty&#10;abc,1&#10;')]"/>
+		</munit:validation>
+	</munit:test>
+
+	<!-- Propósito: un archivo inexistente responde 404 con el ErrorResponse. Resultado esperado: 404 FILE_NOT_FOUND. -->
+	<munit:test name="apiGetFile_whenFileDoesNotExist_thenReturn404">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="sapi-sftp-orders-tih-main"/>
+		</munit:enable-flow-sources>
+		<munit:execution>
+			<http:request method="GET" config-ref="test-api-client" path="/api/v1/sftp/orders/files/it-http-test.csv">
+				<http:headers><![CDATA[#[{ client_id: 'test-id', client_secret: 'test-secret' }]]]></http:headers>
+				<http:response-validator>
+					<http:success-status-code-validator values="0..599"/>
+				</http:response-validator>
+			</http:request>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(404)]"/>
+			<munit-tools:assert-that expression="#[payload.code]" is="#[MunitTools::equalTo('FILE_NOT_FOUND')]"/>
+			<munit-tools:assert-that expression="#[payload.correlationId]" is="#[MunitTools::notNullValue()]"/>
+		</munit:validation>
+	</munit:test>
+
+	<!-- Propósito: GET /files lista el archivo pendiente. Resultado esperado: 200 y el archivo con status pending. -->
+	<munit:test name="apiListFiles_whenFileIsPending_thenReturn200WithFile">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="sapi-sftp-orders-tih-main"/>
+		</munit:enable-flow-sources>
+		<munit:execution>
+			<flow-ref name="test-http-put-flow"/>
+			<http:request method="GET" config-ref="test-api-client" path="/api/v1/sftp/orders/files">
+				<http:headers><![CDATA[#[{ client_id: 'test-id', client_secret: 'test-secret' }]]]></http:headers>
+				<http:response-validator>
+					<http:success-status-code-validator values="0..599"/>
+				</http:response-validator>
+			</http:request>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(200)]"/>
+			<munit-tools:assert-that expression="#[sizeOf(payload.files filter ($.fileName == 'it-http-test.csv'))]" is="#[MunitTools::equalTo(1)]"/>
+		</munit:validation>
+	</munit:test>
+
+	<!-- Propósito: POST /files/{fileName}/move mueve el archivo a processed. Resultado esperado: 200 y status processed. -->
+	<munit:test name="apiMoveFile_whenFileIsPending_thenReturn200Processed">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="sapi-sftp-orders-tih-main"/>
+		</munit:enable-flow-sources>
+		<munit:execution>
+			<flow-ref name="test-http-put-flow"/>
+			<http:request method="POST" config-ref="test-api-client" path="/api/v1/sftp/orders/files/it-http-test.csv/move">
+				<http:body><![CDATA[#[output application/json --- { target: 'processed' }]]]></http:body>
+				<http:headers><![CDATA[#[{ client_id: 'test-id', client_secret: 'test-secret', 'Content-Type': 'application/json' }]]]></http:headers>
+				<http:response-validator>
+					<http:success-status-code-validator values="0..599"/>
+				</http:response-validator>
+			</http:request>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(200)]"/>
+			<munit-tools:assert-that expression="#[payload.status]" is="#[MunitTools::equalTo('processed')]"/>
+			<munit-tools:assert-that expression="#[payload.size]" is="#[MunitTools::equalTo(15)]"/>
+		</munit:validation>
+	</munit:test>
+
+	<!-- Propósito: el contrato rechaza un destino que no sea processed o error. Resultado esperado: 400. -->
+	<munit:test name="apiMoveFile_whenTargetIsInvalid_thenReturn400">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="sapi-sftp-orders-tih-main"/>
+		</munit:enable-flow-sources>
+		<munit:execution>
+			<http:request method="POST" config-ref="test-api-client" path="/api/v1/sftp/orders/files/it-http-test.csv/move">
+				<http:body><![CDATA[#[output application/json --- { target: 'pending' }]]]></http:body>
+				<http:headers><![CDATA[#[{ client_id: 'test-id', client_secret: 'test-secret', 'Content-Type': 'application/json' }]]]></http:headers>
+				<http:response-validator>
+					<http:success-status-code-validator values="0..599"/>
+				</http:response-validator>
+			</http:request>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(400)]"/>
+			<munit-tools:assert-that expression="#[payload.code]" is="#[MunitTools::equalTo('VALIDATION_ERROR')]"/>
+		</munit:validation>
+	</munit:test>
+
+	<!-- Propósito: el contrato valida el nombre de archivo (solo .csv con letras, números, guion y guion bajo). Resultado esperado: 400. -->
+	<munit:test name="apiGetFile_whenFileNameIsInvalid_thenReturn400">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="sapi-sftp-orders-tih-main"/>
+		</munit:enable-flow-sources>
+		<munit:execution>
+			<http:request method="GET" config-ref="test-api-client" path="/api/v1/sftp/orders/files/..%2Fsecreto.txt">
+				<http:headers><![CDATA[#[{ client_id: 'test-id', client_secret: 'test-secret' }]]]></http:headers>
+				<http:response-validator>
+					<http:success-status-code-validator values="0..599"/>
+				</http:response-validator>
+			</http:request>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(400)]"/>
+			<munit-tools:assert-that expression="#[payload.code]" is="#[MunitTools::equalTo('VALIDATION_ERROR')]"/>
+		</munit:validation>
+	</munit:test>
+
+	<!-- Propósito: el contrato exige client_id y client_secret. Resultado esperado: 400. -->
+	<munit:test name="apiListFiles_whenCredentialHeadersAreMissing_thenReturn400">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="sapi-sftp-orders-tih-main"/>
+		</munit:enable-flow-sources>
+		<munit:execution>
+			<http:request method="GET" config-ref="test-api-client" path="/api/v1/sftp/orders/files">
+				<http:response-validator>
+					<http:success-status-code-validator values="0..599"/>
+				</http:response-validator>
+			</http:request>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(400)]"/>
+		</munit:validation>
+	</munit:test>
+
+	<!-- Propósito: una ruta inexistente responde 404 RESOURCE_NOT_FOUND. -->
+	<munit:test name="apiUnknownResource_whenPathDoesNotExist_thenReturn404">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="sapi-sftp-orders-tih-main"/>
+		</munit:enable-flow-sources>
+		<munit:execution>
+			<http:request method="GET" config-ref="test-api-client" path="/api/v1/sftp/orders/no-existe">
+				<http:headers><![CDATA[#[{ client_id: 'test-id', client_secret: 'test-secret' }]]]></http:headers>
+				<http:response-validator>
+					<http:success-status-code-validator values="0..599"/>
+				</http:response-validator>
+			</http:request>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(404)]"/>
+			<munit-tools:assert-that expression="#[payload.code]" is="#[MunitTools::equalTo('RESOURCE_NOT_FOUND')]"/>
+		</munit:validation>
+	</munit:test>
+
+	<!-- Propósito: si el SFTP no está disponible el consumidor recibe 503 reintentable con Retry-After.
+	     Escenario: sftp:list falla con SFTP:CONNECTIVITY (mock). Resultado esperado: 503, retryable true y Retry-After 30. -->
+	<munit:test name="apiListFiles_whenSftpIsDown_thenReturn503WithRetryAfter">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="sapi-sftp-orders-tih-main"/>
+		</munit:enable-flow-sources>
+		<munit:behavior>
+			<munit-tools:mock-when processor="sftp:list">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="sftp-list-order-files"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:error typeId="SFTP:CONNECTIVITY"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+		</munit:behavior>
+		<munit:execution>
+			<http:request method="GET" config-ref="test-api-client" path="/api/v1/sftp/orders/files">
+				<http:headers><![CDATA[#[{ client_id: 'test-id', client_secret: 'test-secret' }]]]></http:headers>
+				<http:response-validator>
+					<http:success-status-code-validator values="0..599"/>
+				</http:response-validator>
+			</http:request>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(503)]"/>
+			<munit-tools:assert-that expression="#[payload.code]" is="#[MunitTools::equalTo('SERVICE_UNAVAILABLE')]"/>
+			<munit-tools:assert-that expression="#[payload.retryable]" is="#[MunitTools::equalTo(true)]"/>
+			<munit-tools:assert-that expression="#[attributes.headers.'retry-after']" is="#[MunitTools::equalTo('30')]"/>
+		</munit:validation>
+	</munit:test>
+
+</mule>

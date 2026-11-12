@@ -1,0 +1,10 @@
+# Copia como dev-secure-application-config.yaml (ignorado por Git) y completa.
+# rabbitmq: mismos valores que RABBITMQ_APP_USER y RABBITMQ_APP_PASSWORD de infra/rabbitmq/credentials.local.
+# magicbell.token: token de Project Auth de tu proyecto MagicBell. Sin token, el pedido se registra igual
+# y solo el correo termina en la DLQ orders.registered.dlq.
+# Puedes dejarlos en claro (solo uso local) o cifrarlos como ![...] con tu propia clave (ver README).
+magicbell:
+  token: "CHANGE_ME"
+rabbitmq:
+  user: "tih-app"
+  password: "CHANGE_ME"

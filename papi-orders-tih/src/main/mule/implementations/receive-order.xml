@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+		http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+	<flow name="orders-receive-flow"
+		doc:name="orders-receive-flow"
+		doc:description="Valida el pedido y el cliente, genera el orderId y deposita el CSV en el SFTP con nombre customerId_orderId.csv">
+		<logger level="INFO"
+			message="#['INIT - Receive order PAPI, correlationId: ' ++ correlationId]"
+			doc:name="logger-receive-order-start"
+			doc:description="Registra el inicio de la recepción del pedido"/>
+		<ee:transform doc:name="transform-save-order-request"
+			doc:description="Guarda la solicitud, genera el orderId y calcula el nombre del archivo y los ids duplicados">
+			<ee:message doc:description="Sin cambios al payload"/>
+			<ee:variables>
+				<ee:set-variable variableName="orderRequest"
+					doc:description="Solicitud original; los conectores reemplazan el payload"><![CDATA[%dw 2.0
+output application/java
+---
+payload]]></ee:set-variable>
+				<ee:set-variable variableName="customerId"
+					doc:description="Cliente que hace el pedido"><![CDATA[%dw 2.0
+output application/java
+---
+lower(payload.customerId)]]></ee:set-variable>
+				<ee:set-variable variableName="orderId"
+					doc:description="Identificador del pedido, generado por esta API"><![CDATA[%dw 2.0
+output application/java
+---
+uuid()]]></ee:set-variable>
+				<ee:set-variable variableName="hasDuplicateItems"
+					doc:description="Indica si el mismo artículo viene en más de una línea (Oracle no lo permite)"><![CDATA[%dw 2.0
+output application/java
+---
+sizeOf(payload.items distinctBy lower($.itemId)) != sizeOf(payload.items)]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+		<choice doc:name="choice-duplicate-items"
+			doc:description="Rechaza pedidos con el mismo artículo repetido: agrupar cantidades es responsabilidad del cliente">
+			<when expression="#[vars.hasDuplicateItems]"
+				doc:description="Se cumple cuando hay itemId repetidos">
+				<raise-error type="APP:VALIDATION_ERROR"
+					description="Un artículo no puede repetirse en el pedido; suma sus cantidades en una sola línea"
+					doc:name="raise-duplicate-items"
+					doc:description="Eleva el error de negocio que se responde como 400"/>
+			</when>
+		</choice>
+		<http:request method="GET" config-ref="papi-customers-http-config" path="#['/customers/' ++ vars.customerId]"
+			doc:name="http-request-get-customer"
+			doc:description="Consulta en papi-customers-tih si el cliente está registrado">
+			<http:headers>#[{ client_id: p('sapi.clientId'), client_secret: p('sapi.clientSecret'), 'x-correlation-id': correlationId }]</http:headers>
+			<http:response-validator>
+				<http:success-status-code-validator values="200..299,404"/>
+			</http:response-validator>
+		</http:request>
+		<choice doc:name="choice-customer-found"
+			doc:description="Responde 404 si el cliente no está registrado">
+			<when expression="#[attributes.statusCode == 404]"
+				doc:description="Se cumple cuando papi-customers-tih respondió 404">
+				<raise-error type="APP:CUSTOMER_NOT_FOUND"
+					description="El cliente no está registrado"
+					doc:name="raise-customer-not-found"
+					doc:description="Eleva el error de negocio que se responde como 404"/>
+			</when>
+		</choice>
+		<ee:transform doc:name="transform-order-csv"
+			doc:description="Genera el CSV item,qty y el nombre del archivo customerId_orderId.csv">
+			<ee:message doc:description="Define el CSV que se deposita en el SFTP">
+				<ee:set-payload resource="dataweave/mapping-order-csv.dwl"
+					doc:description="Una fila por línea del pedido con el itemId y la cantidad"/>
+			</ee:message>
+			<ee:variables>
+				<ee:set-variable variableName="fileName"
+					doc:description="Nombre del archivo: customerId_orderId.csv"><![CDATA[%dw 2.0
+output application/java
+---
+vars.customerId ++ "_" ++ vars.orderId ++ ".csv"]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+		<http:request method="PUT" config-ref="sapi-sftp-orders-http-config" path="#['/files/' ++ vars.fileName]"
+			doc:name="http-request-put-order-file"
+			doc:description="Deposita el CSV en /orders/pending a través de sapi-sftp-orders-tih">
+			<http:headers>#[{ client_id: p('sapi.clientId'), client_secret: p('sapi.clientSecret'), 'x-correlation-id': correlationId, 'Content-Type': 'text/csv' }]</http:headers>
+		</http:request>
+		<ee:transform doc:name="transform-order-received-response"
+			doc:description="Arma el OrderReceived del contrato y fija el estado 201">
+			<ee:message doc:description="Define el payload de la respuesta">
+				<ee:set-payload resource="dataweave/mapping-order-received-response.dwl"
+					doc:description="orderId, customerId, status RECEIVED, fileName y receivedAt"/>
+			</ee:message>
+			<ee:variables>
+				<ee:set-variable variableName="httpStatus"
+					doc:description="La recepción responde 201 Created"><![CDATA[%dw 2.0
+output application/java
+---
+201]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+		<logger level="INFO"
+			message="#[output text/plain --- 'END - Receive order PAPI, orderId: ' ++ vars.orderId ++ ' file: ' ++ vars.fileName ++ ' correlationId: ' ++ correlationId]"
+			doc:name="logger-receive-order-end"
+			doc:description="Registra el orderId y el archivo depositado"/>
+	</flow>
+
+</mule>

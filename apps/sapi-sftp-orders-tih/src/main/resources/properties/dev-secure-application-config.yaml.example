@@ -1,0 +1,5 @@
+# Copia como dev-secure-application-config.yaml (ignorado por Git) y completa.
+# Por ahora en claro y solo para uso local; luego se cifran con secure-mule-app.
+sftp:
+  user: "CHANGE_ME"
+  password: "CHANGE_ME"

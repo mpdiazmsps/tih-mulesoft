@@ -1,0 +1,46 @@
+#%RAML 1.0
+title: papi-customers-tih
+version: v1
+baseUri: http://localhost:8082/api/v1/customers-management
+protocols: [HTTP]
+mediaType: application/json
+description: |
+  Process API de gestión de clientes.
+  Reglas de negocio: se requiere email o teléfono, no se permiten duplicados por email o teléfono
+  y el identificador (UUID) y la fecha de creación los genera esta API.
+
+uses:
+  types: fragments/tih-common-types.raml
+  traits: fragments/tih-common-traits.raml
+
+/customers:
+  post:
+    displayName: Registrar cliente
+    description: |
+      Valida el cliente, comprueba que no exista otro con el mismo email o teléfono, genera el UUID y lo registra.
+    is: [traits.secured, traits.validated, traits.conflict, traits.retryable]
+    body:
+      application/json:
+        type: types.CustomerRequest
+    responses:
+      201:
+        description: Cliente registrado.
+        body:
+          application/json:
+            type: types.CustomerCreated
+
+  /{customerId}:
+    uriParameters:
+      customerId:
+        description: Identificador del cliente.
+        type: types.Uuid
+    get:
+      displayName: Consultar cliente
+      description: Devuelve los datos de un cliente. Lo usan papi-orders-tih (validar el cliente) y papi-notifications-tih (obtener el correo).
+      is: [traits.secured, traits.not-found, traits.retryable]
+      responses:
+        200:
+          description: Cliente encontrado.
+          body:
+            application/json:
+              type: types.Customer

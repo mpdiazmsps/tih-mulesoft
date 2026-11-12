@@ -1,0 +1,26 @@
+# Ambiente QA: copia inicial de dev.
+# Cambiar hosts, puertos y demas valores antes de usar este ambiente.
+# Configuración del ambiente local. client_id/client_secret son placeholders: la política
+# Client ID Enforcement solo existe en API Manager (no se usa en local).
+http:
+  listener:
+    host: "0.0.0.0"
+    port: "8080"
+    basePath: "/api/v1/online-store"
+
+papi:
+  customers:
+    host: "localhost"
+    port: "8082"
+    basePath: "/api/v1/customers-management"
+  orders:
+    host: "localhost"
+    port: "8083"
+    basePath: "/api/v1/orders-management"
+  timeoutMillis: "20000"
+  clientId: "local-client-id"
+  clientSecret: "local-client-secret"
+
+# Segundos que se sugieren al consumidor en Retry-After cuando un backend no está disponible
+error:
+  retryAfterSeconds: "30"

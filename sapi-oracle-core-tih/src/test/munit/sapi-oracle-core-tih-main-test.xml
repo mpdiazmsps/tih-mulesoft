@@ -1,0 +1,465 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns:munit="http://www.mulesoft.org/schema/mule/munit"
+	xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+		http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+		http://www.mulesoft.org/schema/mule/munit http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+		http://www.mulesoft.org/schema/mule/munit-tools http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd">
+
+	<!-- Pruebas de integración HTTP: se habilita el listener real de la API (puerto 8091) y se la invoca por HTTP,
+	     de modo que se ejercitan APIkit, los flujos de interfaz, los manejadores de error y los códigos de respuesta.
+	     Oracle se simula con mocks, por lo que no se contacta ninguna base de datos. -->
+	<munit:config name="sapi-oracle-core-tih-main-test.xml"/>
+
+	<!-- MUnit inicializa los flujos de forma perezosa y APIkit arma su tabla de rutas con los flujos ya inicializados.
+	     Se invocan una vez los 6 flujos de interfaz (con Oracle simulado) para que el router los encuentre. -->
+	<munit:before-suite name="sapi-oracle-core-tih-main-warm-up">
+		<munit-tools:mock-when processor="db:select">
+			<munit-tools:then-return>
+				<munit-tools:payload value="#[output application/java --- [{ TOTAL: 0 }]]" mediaType="application/java"/>
+			</munit-tools:then-return>
+		</munit-tools:mock-when>
+		<munit-tools:mock-when processor="db:insert">
+			<munit-tools:then-return>
+				<munit-tools:payload value="#[output application/java --- { affectedRows: 1 }]" mediaType="application/java"/>
+			</munit-tools:then-return>
+		</munit-tools:mock-when>
+		<munit-tools:mock-when processor="db:bulk-insert">
+			<munit-tools:then-return>
+				<munit-tools:payload value="#[output application/java --- [1]]" mediaType="application/java"/>
+			</munit-tools:then-return>
+		</munit-tools:mock-when>
+		<try>
+			<flow-ref name="get:\customers:sapi-oracle-core-tih-config"/>
+			<error-handler>
+				<on-error-continue/>
+			</error-handler>
+		</try>
+		<try>
+			<flow-ref name="post:\customers:application\json:sapi-oracle-core-tih-config"/>
+			<error-handler>
+				<on-error-continue/>
+			</error-handler>
+		</try>
+		<try>
+			<flow-ref name="get:\customers\(customerId):sapi-oracle-core-tih-config"/>
+			<error-handler>
+				<on-error-continue/>
+			</error-handler>
+		</try>
+		<try>
+			<flow-ref name="get:\inventory\items:sapi-oracle-core-tih-config"/>
+			<error-handler>
+				<on-error-continue/>
+			</error-handler>
+		</try>
+		<try>
+			<flow-ref name="post:\orders:application\json:sapi-oracle-core-tih-config"/>
+			<error-handler>
+				<on-error-continue/>
+			</error-handler>
+		</try>
+		<try>
+			<flow-ref name="get:\orders\(orderId):sapi-oracle-core-tih-config"/>
+			<error-handler>
+				<on-error-continue/>
+			</error-handler>
+		</try>
+	</munit:before-suite>
+
+	<http:request-config name="test-api-client" doc:name="HTTP Request configuration">
+		<http:request-connection host="localhost" port="8091"/>
+	</http:request-config>
+
+	<!-- Propósito: GET /customers/{id} responde 200 con el Customer cuando la fila existe.
+	     Escenario: petición HTTP con credenciales de aplicación; Oracle (mock) devuelve una fila.
+	     Resultado esperado: 200, JSON con el id y el correo. -->
+	<munit:test name="apiGetCustomer_whenCustomerExists_thenReturn200"
+		description="GET /customers/{id} responde 200 con el cliente">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="sapi-oracle-core-tih-main"/>
+		</munit:enable-flow-sources>
+		<munit:behavior>
+			<munit-tools:mock-when processor="db:select">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="db-select-customer-by-id"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/java --- readUrl('classpath://payloads/customer-rows.json', 'application/json')]" mediaType="application/java"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+		</munit:behavior>
+		<munit:execution>
+			<http:request method="GET" config-ref="test-api-client" path="/api/v1/core/store/customers/3f2b8c1e-7a4d-4e5b-9c0a-1d2e3f4a5b6c">
+				<http:headers><![CDATA[#[{ client_id: 'test-id', client_secret: 'test-secret' }]]]></http:headers>
+				<http:response-validator>
+					<http:success-status-code-validator values="0..599"/>
+				</http:response-validator>
+			</http:request>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(200)]"/>
+			<munit-tools:assert-that expression="#[payload.id]" is="#[MunitTools::equalTo('3f2b8c1e-7a4d-4e5b-9c0a-1d2e3f4a5b6c')]"/>
+			<munit-tools:assert-that expression="#[payload.email]" is="#[MunitTools::equalTo('ana.perez@example.com')]"/>
+		</munit:validation>
+	</munit:test>
+
+	<!-- Propósito: un cliente inexistente responde 404 con el ErrorResponse del contrato.
+	     Escenario: Oracle (mock) devuelve cero filas. Resultado esperado: 404, code CUSTOMER_NOT_FOUND, retryable false. -->
+	<munit:test name="apiGetCustomer_whenCustomerDoesNotExist_thenReturn404"
+		description="GET /customers/{id} responde 404 si no existe">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="sapi-oracle-core-tih-main"/>
+		</munit:enable-flow-sources>
+		<munit:behavior>
+			<munit-tools:mock-when processor="db:select">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="db-select-customer-by-id"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/java --- []]" mediaType="application/java"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+		</munit:behavior>
+		<munit:execution>
+			<http:request method="GET" config-ref="test-api-client" path="/api/v1/core/store/customers/00000000-0000-0000-0000-000000000000">
+				<http:headers><![CDATA[#[{ client_id: 'test-id', client_secret: 'test-secret' }]]]></http:headers>
+				<http:response-validator>
+					<http:success-status-code-validator values="0..599"/>
+				</http:response-validator>
+			</http:request>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(404)]"/>
+			<munit-tools:assert-that expression="#[payload.code]" is="#[MunitTools::equalTo('CUSTOMER_NOT_FOUND')]"/>
+			<munit-tools:assert-that expression="#[payload.retryable]" is="#[MunitTools::equalTo(false)]"/>
+			<munit-tools:assert-that expression="#[payload.correlationId]" is="#[MunitTools::notNullValue()]"/>
+		</munit:validation>
+	</munit:test>
+
+	<!-- Propósito: si Oracle no está disponible el consumidor recibe 503 reintentable con Retry-After.
+	     Escenario: db:select falla con DB:CONNECTIVITY. Resultado esperado: 503, SERVICE_UNAVAILABLE, retryable true, Retry-After 30. -->
+	<munit:test name="apiGetCustomer_whenDatabaseIsDown_thenReturn503WithRetryAfter"
+		description="GET /customers/{id} responde 503 reintentable si Oracle cae">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="sapi-oracle-core-tih-main"/>
+		</munit:enable-flow-sources>
+		<munit:behavior>
+			<munit-tools:mock-when processor="db:select">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="db-select-customer-by-id"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:error typeId="DB:CONNECTIVITY"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+		</munit:behavior>
+		<munit:execution>
+			<http:request method="GET" config-ref="test-api-client" path="/api/v1/core/store/customers/3f2b8c1e-7a4d-4e5b-9c0a-1d2e3f4a5b6c">
+				<http:headers><![CDATA[#[{ client_id: 'test-id', client_secret: 'test-secret' }]]]></http:headers>
+				<http:response-validator>
+					<http:success-status-code-validator values="0..599"/>
+				</http:response-validator>
+			</http:request>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(503)]"/>
+			<munit-tools:assert-that expression="#[payload.code]" is="#[MunitTools::equalTo('SERVICE_UNAVAILABLE')]"/>
+			<munit-tools:assert-that expression="#[payload.retryable]" is="#[MunitTools::equalTo(true)]"/>
+			<munit-tools:assert-that expression="#[attributes.headers.'retry-after']" is="#[MunitTools::equalTo('30')]"/>
+		</munit:validation>
+	</munit:test>
+
+	<!-- Propósito: la búsqueda sin filtros se rechaza antes de tocar Oracle.
+	     Escenario: GET /customers sin email ni phone. Resultado esperado: 400 VALIDATION_ERROR con el mensaje de negocio. -->
+	<munit:test name="apiSearchCustomers_whenNoFilter_thenReturn400"
+		description="GET /customers sin filtros responde 400">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="sapi-oracle-core-tih-main"/>
+		</munit:enable-flow-sources>
+		<munit:execution>
+			<http:request method="GET" config-ref="test-api-client" path="/api/v1/core/store/customers">
+				<http:headers><![CDATA[#[{ client_id: 'test-id', client_secret: 'test-secret' }]]]></http:headers>
+				<http:response-validator>
+					<http:success-status-code-validator values="0..599"/>
+				</http:response-validator>
+			</http:request>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(400)]"/>
+			<munit-tools:assert-that expression="#[payload.code]" is="#[MunitTools::equalTo('VALIDATION_ERROR')]"/>
+			<munit-tools:assert-that expression="#[payload.message]" is="#[MunitTools::equalTo('Se requiere al menos un filtro: email o phone')]"/>
+		</munit:validation>
+	</munit:test>
+
+	<!-- Propósito: APIkit valida el contrato RAML antes de ejecutar la lógica.
+	     Escenario: el id del cliente no es un UUID. Resultado esperado: 400 VALIDATION_ERROR. -->
+	<munit:test name="apiGetCustomer_whenIdIsNotUuid_thenReturn400"
+		description="Un id que no es UUID se rechaza con 400">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="sapi-oracle-core-tih-main"/>
+		</munit:enable-flow-sources>
+		<munit:execution>
+			<http:request method="GET" config-ref="test-api-client" path="/api/v1/core/store/customers/no-es-un-uuid">
+				<http:headers><![CDATA[#[{ client_id: 'test-id', client_secret: 'test-secret' }]]]></http:headers>
+				<http:response-validator>
+					<http:success-status-code-validator values="0..599"/>
+				</http:response-validator>
+			</http:request>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(400)]"/>
+			<munit-tools:assert-that expression="#[payload.code]" is="#[MunitTools::equalTo('VALIDATION_ERROR')]"/>
+		</munit:validation>
+	</munit:test>
+
+	<!-- Propósito: el contrato exige las credenciales de aplicación (client_id y client_secret).
+	     Escenario: petición sin esos headers. Resultado esperado: 400 VALIDATION_ERROR. -->
+	<munit:test name="apiGetCustomer_whenCredentialHeadersAreMissing_thenReturn400"
+		description="Sin client_id y client_secret el contrato rechaza la petición">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="sapi-oracle-core-tih-main"/>
+		</munit:enable-flow-sources>
+		<munit:execution>
+			<http:request method="GET" config-ref="test-api-client" path="/api/v1/core/store/customers/3f2b8c1e-7a4d-4e5b-9c0a-1d2e3f4a5b6c">
+				<http:response-validator>
+					<http:success-status-code-validator values="0..599"/>
+				</http:response-validator>
+			</http:request>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(400)]"/>
+			<munit-tools:assert-that expression="#[payload.code]" is="#[MunitTools::equalTo('VALIDATION_ERROR')]"/>
+		</munit:validation>
+	</munit:test>
+
+	<!-- Propósito: una ruta que no existe responde 404 con el ErrorResponse. Resultado esperado: 404 RESOURCE_NOT_FOUND. -->
+	<munit:test name="apiUnknownResource_whenPathDoesNotExist_thenReturn404"
+		description="Una ruta inexistente responde 404">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="sapi-oracle-core-tih-main"/>
+		</munit:enable-flow-sources>
+		<munit:execution>
+			<http:request method="GET" config-ref="test-api-client" path="/api/v1/core/store/no-existe">
+				<http:headers><![CDATA[#[{ client_id: 'test-id', client_secret: 'test-secret' }]]]></http:headers>
+				<http:response-validator>
+					<http:success-status-code-validator values="0..599"/>
+				</http:response-validator>
+			</http:request>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(404)]"/>
+			<munit-tools:assert-that expression="#[payload.code]" is="#[MunitTools::equalTo('RESOURCE_NOT_FOUND')]"/>
+		</munit:validation>
+	</munit:test>
+
+	<!-- Propósito: un método no permitido responde 405. Escenario: DELETE sobre /customers/{id}. Resultado esperado: 405. -->
+	<munit:test name="apiDeleteCustomer_whenMethodNotAllowed_thenReturn405"
+		description="DELETE no está definido y responde 405">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="sapi-oracle-core-tih-main"/>
+		</munit:enable-flow-sources>
+		<munit:execution>
+			<http:request method="DELETE" config-ref="test-api-client" path="/api/v1/core/store/customers/3f2b8c1e-7a4d-4e5b-9c0a-1d2e3f4a5b6c">
+				<http:headers><![CDATA[#[{ client_id: 'test-id', client_secret: 'test-secret' }]]]></http:headers>
+				<http:response-validator>
+					<http:success-status-code-validator values="0..599"/>
+				</http:response-validator>
+			</http:request>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(405)]"/>
+			<munit-tools:assert-that expression="#[payload.code]" is="#[MunitTools::equalTo('METHOD_NOT_ALLOWED')]"/>
+		</munit:validation>
+	</munit:test>
+
+	<!-- Propósito: POST /customers valida el cuerpo contra el RAML.
+	     Escenario: correo con formato inválido. Resultado esperado: 400 y Oracle no se invoca. -->
+	<munit:test name="apiCreateCustomer_whenEmailIsInvalid_thenReturn400"
+		description="POST /customers con email inválido responde 400">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="sapi-oracle-core-tih-main"/>
+		</munit:enable-flow-sources>
+		<munit:execution>
+			<http:request method="POST" config-ref="test-api-client" path="/api/v1/core/store/customers">
+				<http:body><![CDATA[#[output application/json --- { id: '3f2b8c1e-7a4d-4e5b-9c0a-1d2e3f4a5b6c', name: 'Ana', email: 'no-es-un-correo', creationDate: '2026-10-07T16:30:00Z' }]]]></http:body>
+				<http:headers><![CDATA[#[{ client_id: 'test-id', client_secret: 'test-secret', 'Content-Type': 'application/json' }]]]></http:headers>
+				<http:response-validator>
+					<http:success-status-code-validator values="0..599"/>
+				</http:response-validator>
+			</http:request>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(400)]"/>
+			<munit-tools:assert-that expression="#[payload.code]" is="#[MunitTools::equalTo('VALIDATION_ERROR')]"/>
+			<munit-tools:verify-call processor="db:insert" times="0"/>
+		</munit:validation>
+	</munit:test>
+
+	<!-- Propósito: POST /customers responde 201 con el cliente creado y el estado HTTP definido por el flujo.
+	     Escenario: cuerpo válido; Oracle (mock) acepta el insert. Resultado esperado: 201 con el id y el nombre. -->
+	<munit:test name="apiCreateCustomer_whenBodyIsValid_thenReturn201"
+		description="POST /customers responde 201 con el cliente creado">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="sapi-oracle-core-tih-main"/>
+		</munit:enable-flow-sources>
+		<munit:behavior>
+			<munit-tools:mock-when processor="db:insert">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="db-insert-customer"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/java --- { affectedRows: 1 }]" mediaType="application/java"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+		</munit:behavior>
+		<munit:execution>
+			<http:request method="POST" config-ref="test-api-client" path="/api/v1/core/store/customers">
+				<http:body><![CDATA[#[output application/json --- { id: '3f2b8c1e-7a4d-4e5b-9c0a-1d2e3f4a5b6c', name: 'Ana', lastName: 'Pérez', email: 'ana.perez@example.com', phone: '+5215512345678', creationDate: '2026-10-07T16:30:00Z' }]]]></http:body>
+				<http:headers><![CDATA[#[{ client_id: 'test-id', client_secret: 'test-secret', 'Content-Type': 'application/json' }]]]></http:headers>
+				<http:response-validator>
+					<http:success-status-code-validator values="0..599"/>
+				</http:response-validator>
+			</http:request>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(201)]"/>
+			<munit-tools:assert-that expression="#[payload.id]" is="#[MunitTools::equalTo('3f2b8c1e-7a4d-4e5b-9c0a-1d2e3f4a5b6c')]"/>
+			<munit-tools:assert-that expression="#[payload.name]" is="#[MunitTools::equalTo('Ana')]"/>
+		</munit:validation>
+	</munit:test>
+
+	<!-- Propósito: POST /orders exige al menos una línea. Escenario: items vacío. Resultado esperado: 400. -->
+	<munit:test name="apiCreateOrder_whenItemsAreEmpty_thenReturn400"
+		description="POST /orders sin líneas responde 400">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="sapi-oracle-core-tih-main"/>
+		</munit:enable-flow-sources>
+		<munit:execution>
+			<http:request method="POST" config-ref="test-api-client" path="/api/v1/core/store/orders">
+				<http:body><![CDATA[#[output application/json --- { orderId: '9d8c7b6a-5f4e-4d3c-8b2a-1f0e9d8c7b6a', customerId: '3f2b8c1e-7a4d-4e5b-9c0a-1d2e3f4a5b6c', items: [] }]]]></http:body>
+				<http:headers><![CDATA[#[{ client_id: 'test-id', client_secret: 'test-secret', 'Content-Type': 'application/json' }]]]></http:headers>
+				<http:response-validator>
+					<http:success-status-code-validator values="0..599"/>
+				</http:response-validator>
+			</http:request>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(400)]"/>
+			<munit-tools:assert-that expression="#[payload.code]" is="#[MunitTools::equalTo('VALIDATION_ERROR')]"/>
+		</munit:validation>
+	</munit:test>
+
+	<!-- Propósito: POST /orders responde 201 con el Order y su total.
+	     Escenario: pedido nuevo con 2 líneas; Oracle (mock) acepta el insert masivo. Resultado esperado: 201, total 2609.95. -->
+	<munit:test name="apiCreateOrder_whenOrderIsNew_thenReturn201WithTotal"
+		description="POST /orders responde 201 con el pedido y su total">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="sapi-oracle-core-tih-main"/>
+		</munit:enable-flow-sources>
+		<munit:behavior>
+			<munit-tools:mock-when processor="db:select">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="db-select-order-exists"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/java --- [{ TOTAL: 0 }]]" mediaType="application/java"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit-tools:mock-when processor="db:bulk-insert">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="db-bulk-insert-order-lines"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/java --- [1, 1]]" mediaType="application/java"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+		</munit:behavior>
+		<munit:execution>
+			<http:request method="POST" config-ref="test-api-client" path="/api/v1/core/store/orders">
+				<http:body><![CDATA[#[output application/json --- readUrl('classpath://payloads/order-create-request.json', 'application/json')]]]></http:body>
+				<http:headers><![CDATA[#[{ client_id: 'test-id', client_secret: 'test-secret', 'Content-Type': 'application/json' }]]]></http:headers>
+				<http:response-validator>
+					<http:success-status-code-validator values="0..599"/>
+				</http:response-validator>
+			</http:request>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(201)]"/>
+			<munit-tools:assert-that expression="#[payload.id]" is="#[MunitTools::equalTo('9d8c7b6a-5f4e-4d3c-8b2a-1f0e9d8c7b6a')]"/>
+			<munit-tools:assert-that expression="#[payload.total as String]" is="#[MunitTools::equalTo('2609.95')]"/>
+		</munit:validation>
+	</munit:test>
+
+	<!-- Propósito: GET /inventory/items responde 200 con los artículos. Escenario: ids válidos; Oracle (mock) devuelve 2 filas.
+	     Resultado esperado: 200 y 2 artículos. -->
+	<munit:test name="apiGetInventoryItems_whenIdsAreValid_thenReturn200"
+		description="GET /inventory/items responde 200 con los artículos">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="sapi-oracle-core-tih-main"/>
+		</munit:enable-flow-sources>
+		<munit:behavior>
+			<munit-tools:mock-when processor="db:select">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="db-select-inventory-items"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/java --- readUrl('classpath://payloads/inventory-rows.json', 'application/json')]" mediaType="application/java"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+		</munit:behavior>
+		<munit:execution>
+			<http:request method="GET" config-ref="test-api-client" path="/api/v1/core/store/inventory/items">
+				<http:headers><![CDATA[#[{ client_id: 'test-id', client_secret: 'test-secret' }]]]></http:headers>
+				<http:query-params><![CDATA[#[{ ids: 'c1a2b3c4-d5e6-4789-a012-3456789abc01,7a8b9c0d-1e2f-43a4-b5c6-d7e8f9a0b1c2' }]]]></http:query-params>
+				<http:response-validator>
+					<http:success-status-code-validator values="0..599"/>
+				</http:response-validator>
+			</http:request>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(200)]"/>
+			<munit-tools:assert-that expression="#[sizeOf(payload.items)]" is="#[MunitTools::equalTo(2)]"/>
+		</munit:validation>
+	</munit:test>
+
+	<!-- Propósito: GET /orders/{id} responde 200 con el pedido agrupado. Escenario: Oracle (mock) devuelve 2 líneas.
+	     Resultado esperado: 200, 2 líneas y total 2609.95. -->
+	<munit:test name="apiGetOrder_whenOrderExists_thenReturn200"
+		description="GET /orders/{id} responde 200 con el pedido">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="sapi-oracle-core-tih-main"/>
+		</munit:enable-flow-sources>
+		<munit:behavior>
+			<munit-tools:mock-when processor="db:select">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="db-select-order-lines-by-id"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/java --- readUrl('classpath://payloads/order-rows.json', 'application/json')]" mediaType="application/java"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+		</munit:behavior>
+		<munit:execution>
+			<http:request method="GET" config-ref="test-api-client" path="/api/v1/core/store/orders/9d8c7b6a-5f4e-4d3c-8b2a-1f0e9d8c7b6a">
+				<http:headers><![CDATA[#[{ client_id: 'test-id', client_secret: 'test-secret' }]]]></http:headers>
+				<http:response-validator>
+					<http:success-status-code-validator values="0..599"/>
+				</http:response-validator>
+			</http:request>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(200)]"/>
+			<munit-tools:assert-that expression="#[sizeOf(payload.items)]" is="#[MunitTools::equalTo(2)]"/>
+			<munit-tools:assert-that expression="#[payload.total as String]" is="#[MunitTools::equalTo('2609.95')]"/>
+		</munit:validation>
+	</munit:test>
+
+</mule>

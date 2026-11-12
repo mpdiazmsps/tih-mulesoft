@@ -1,0 +1,462 @@
+#%RAML 1.0 Library
+usage: |
+  Tipos de datos compartidos del proyecto TIH (tienda en línea).
+  Los nombres JSON van en camelCase; las columnas de Oracle (snake_case) se mapean en la SAPI con DataWeave.
+
+types:
+  Uuid:
+    description: Identificador UUID (se guarda como VARCHAR2(36) en Oracle).
+    type: string
+    pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+    example: 3f2b8c1e-7a4d-4e5b-9c0a-1d2e3f4a5b6c
+
+  Email:
+    description: Correo electrónico (máximo 200 caracteres, igual que CUSTOMERS.CLIENT_EMAIL).
+    type: string
+    maxLength: 200
+    pattern: '^[^@\s]+@[^@\s]+\.[^@\s]+$'
+    example: ana.perez@example.com
+
+  Phone:
+    description: Teléfono con 7 a 14 dígitos y prefijo + opcional (máximo 15 caracteres, igual que CUSTOMERS.CLIENT_PHONE).
+    type: string
+    maxLength: 15
+    pattern: '^\+?[0-9]{7,14}$'
+    example: '+5215512345678'
+
+  ProviderAbv:
+    description: |
+      Clave abreviada del proveedor de precios, tal como está en INVENTORY.PROVIDER_ABV.
+      - FAK: Fakestore (REST).
+      - ESC: Escuelajs (REST).
+      - BOR: Borland (SOAP). Fuera de alcance por ahora, responde 501 PROVIDER_NOT_SUPPORTED.
+    type: string
+    enum: [FAK, ESC, BOR]
+    example: FAK
+
+  # ---------------------------------------------------------------- Clientes
+  CustomerRequest:
+    description: |
+      Datos para registrar un cliente.
+      Regla de negocio (la valida papi-customers, RAML no puede expresarla): se requiere **email o phone**.
+    type: object
+    properties:
+      name:
+        description: Nombre del cliente.
+        type: string
+        minLength: 1
+        maxLength: 100
+        example: Ana
+      lastName:
+        description: Apellido del cliente.
+        type: string
+        maxLength: 100
+        required: false
+        example: Pérez
+      email:
+        description: Correo. Obligatorio cuando no se envía phone.
+        type: Email
+        required: false
+      phone:
+        description: Teléfono. Obligatorio cuando no se envía email.
+        type: Phone
+        required: false
+    example:
+      name: Ana
+      lastName: Pérez
+      email: ana.perez@example.com
+      phone: '+5215512345678'
+
+  Customer:
+    description: Cliente registrado (tabla CUSTOMERS).
+    type: CustomerRequest
+    properties:
+      id:
+        description: Identificador del cliente, generado por papi-customers.
+        type: Uuid
+      creationDate:
+        description: Fecha de creación del cliente.
+        type: datetime
+    example:
+      id: 3f2b8c1e-7a4d-4e5b-9c0a-1d2e3f4a5b6c
+      name: Ana
+      lastName: Pérez
+      email: ana.perez@example.com
+      phone: '+5215512345678'
+      creationDate: 2026-10-07T16:30:00Z
+
+  CustomerCreated:
+    description: Resultado del registro de un cliente.
+    type: object
+    properties:
+      customerId: Uuid
+      creationDate: datetime
+    example:
+      customerId: 3f2b8c1e-7a4d-4e5b-9c0a-1d2e3f4a5b6c
+      creationDate: 2026-10-07T16:30:00Z
+
+  CustomerList:
+    description: Lista de clientes (puede estar vacía).
+    type: object
+    properties:
+      customers: Customer[]
+    example:
+      customers:
+        - id: 3f2b8c1e-7a4d-4e5b-9c0a-1d2e3f4a5b6c
+          name: Ana
+          lastName: Pérez
+          email: ana.perez@example.com
+          phone: '+5215512345678'
+          creationDate: 2026-10-07T16:30:00Z
+
+  # ----------------------------------------------------------------- Pedidos
+  OrderItemRequest:
+    description: Artículo solicitado en un pedido. itemId es el id interno de INVENTORY.
+    type: object
+    properties:
+      itemId: Uuid
+      quantity:
+        description: Cantidad solicitada.
+        type: integer
+        minimum: 1
+        maximum: 1000
+        example: 2
+    example:
+      itemId: c1a2b3c4-d5e6-4789-a012-3456789abc01
+      quantity: 2
+
+  OrderRequest:
+    description: Solicitud de pedido. El cliente debe estar registrado.
+    type: object
+    properties:
+      customerId: Uuid
+      items:
+        type: array
+        minItems: 1
+        maxItems: 100
+        items: OrderItemRequest
+    example:
+      customerId: 3f2b8c1e-7a4d-4e5b-9c0a-1d2e3f4a5b6c
+      items:
+        - itemId: c1a2b3c4-d5e6-4789-a012-3456789abc01
+          quantity: 2
+        - itemId: 7a8b9c0d-1e2f-43a4-b5c6-d7e8f9a0b1c2
+          quantity: 1
+
+  OrderReceived:
+    description: Confirmación de recepción del pedido. El CSV ya quedó depositado en el SFTP.
+    type: object
+    properties:
+      orderId: Uuid
+      customerId: Uuid
+      status:
+        type: string
+        enum: [RECEIVED]
+      fileName:
+        description: Nombre del CSV depositado (<customerId>_<orderId>.csv).
+        type: string
+      receivedAt: datetime
+    example:
+      orderId: 9d8c7b6a-5f4e-4d3c-8b2a-1f0e9d8c7b6a
+      customerId: 3f2b8c1e-7a4d-4e5b-9c0a-1d2e3f4a5b6c
+      status: RECEIVED
+      fileName: 3f2b8c1e-7a4d-4e5b-9c0a-1d2e3f4a5b6c_9d8c7b6a-5f4e-4d3c-8b2a-1f0e9d8c7b6a.csv
+      receivedAt: 2026-10-07T16:35:00Z
+
+  OrderLine:
+    description: Línea de pedido ya cotizada (una fila de ORDERS).
+    type: object
+    properties:
+      itemId: Uuid
+      quantity:
+        type: integer
+        minimum: 1
+      price:
+        description: Precio unitario (precio de la tienda o del proveedor).
+        type: number
+        minimum: 0
+    example:
+      itemId: c1a2b3c4-d5e6-4789-a012-3456789abc01
+      quantity: 2
+      price: 1250
+
+  OrderRecordRequest:
+    description: Pedido ya cotizado, listo para registrarse en Oracle en una sola transacción.
+    type: object
+    properties:
+      orderId: Uuid
+      customerId: Uuid
+      items:
+        type: array
+        minItems: 1
+        items: OrderLine
+    example:
+      orderId: 9d8c7b6a-5f4e-4d3c-8b2a-1f0e9d8c7b6a
+      customerId: 3f2b8c1e-7a4d-4e5b-9c0a-1d2e3f4a5b6c
+      items:
+        - itemId: c1a2b3c4-d5e6-4789-a012-3456789abc01
+          quantity: 2
+          price: 1250
+        - itemId: 7a8b9c0d-1e2f-43a4-b5c6-d7e8f9a0b1c2
+          quantity: 1
+          price: 109.95
+
+  Order:
+    description: Pedido registrado (todas las filas de ORDERS con el mismo id).
+    type: object
+    properties:
+      id: Uuid
+      customerId: Uuid
+      items: OrderLine[]
+      total:
+        description: Suma de quantity * price de todas las líneas.
+        type: number
+      creationDate: datetime
+    example:
+      id: 9d8c7b6a-5f4e-4d3c-8b2a-1f0e9d8c7b6a
+      customerId: 3f2b8c1e-7a4d-4e5b-9c0a-1d2e3f4a5b6c
+      items:
+        - itemId: c1a2b3c4-d5e6-4789-a012-3456789abc01
+          quantity: 2
+          price: 1250
+        - itemId: 7a8b9c0d-1e2f-43a4-b5c6-d7e8f9a0b1c2
+          quantity: 1
+          price: 109.95
+      total: 2609.95
+      creationDate: 2026-10-07T16:40:00Z
+
+  ProcessResult:
+    description: Resultado de disparar manualmente el procesamiento de pedidos pendientes.
+    type: object
+    properties:
+      status:
+        type: string
+        enum: [ACCEPTED]
+      message: string
+    example:
+      status: ACCEPTED
+      message: Procesamiento de pedidos pendientes iniciado
+
+  OrderRegisteredEvent:
+    description: Evento que se publica en el exchange orders.events con routing key order.registered.
+    type: object
+    properties:
+      eventType:
+        type: string
+        enum: [order.registered]
+      orderId: Uuid
+      customerId: Uuid
+      items: OrderLine[]
+      total: number
+      createdAt: datetime
+    example:
+      eventType: order.registered
+      orderId: 9d8c7b6a-5f4e-4d3c-8b2a-1f0e9d8c7b6a
+      customerId: 3f2b8c1e-7a4d-4e5b-9c0a-1d2e3f4a5b6c
+      items:
+        - itemId: c1a2b3c4-d5e6-4789-a012-3456789abc01
+          quantity: 2
+          price: 1250
+      total: 2500
+      createdAt: 2026-10-07T16:40:00Z
+
+  # -------------------------------------------------------------- Inventario
+  InventoryItem:
+    description: Artículo del inventario (tabla INVENTORY).
+    type: object
+    properties:
+      id: Uuid
+      name:
+        type: string
+        maxLength: 100
+      description:
+        type: string
+        maxLength: 255
+        required: false
+      stockQty: integer
+      localPrice:
+        description: Precio de la tienda. Si es 0, el precio se consulta con el proveedor.
+        type: number
+      externalId:
+        description: Identificador del artículo en el proveedor. Presente cuando localPrice es 0.
+        type: integer
+        required: false
+      providerAbv:
+        description: Proveedor de precios. Presente cuando localPrice es 0.
+        type: ProviderAbv
+        required: false
+      creationDate: datetime
+    example:
+      id: 7a8b9c0d-1e2f-43a4-b5c6-d7e8f9a0b1c2
+      name: Mochila Casual
+      stockQty: 100
+      localPrice: 0
+      externalId: 1
+      providerAbv: FAK
+      creationDate: 2026-01-15T10:00:00Z
+
+  InventoryItemList:
+    description: Artículos encontrados. Los ids que no existen no aparecen en la lista.
+    type: object
+    properties:
+      items: InventoryItem[]
+    example:
+      items:
+        - id: c1a2b3c4-d5e6-4789-a012-3456789abc01
+          name: Teclado Mecanico
+          stockQty: 100
+          localPrice: 1250
+          creationDate: 2026-01-15T10:00:00Z
+
+  # ----------------------------------------------------- Proveedores de precio
+  Price:
+    description: Precio en modelo canónico, independiente del proveedor.
+    type: object
+    properties:
+      externalId: integer
+      providerAbv: ProviderAbv
+      name:
+        type: string
+        required: false
+      price:
+        type: number
+        minimum: 0
+      currency:
+        type: string
+        example: USD
+    example:
+      externalId: 1
+      providerAbv: FAK
+      name: Fjallraven - Foldsack No. 1 Backpack
+      price: 109.95
+      currency: USD
+
+  # ------------------------------------------------------------------- SFTP
+  FileStatus:
+    description: Carpeta de /orders donde está el archivo.
+    type: string
+    enum: [pending, processed, error]
+
+  FileName:
+    description: Nombre de archivo CSV (solo letras, números, guion y guion bajo).
+    type: string
+    pattern: '^[A-Za-z0-9_\-]+\.csv$'
+    example: 3f2b8c1e-7a4d-4e5b-9c0a-1d2e3f4a5b6c_9d8c7b6a-5f4e-4d3c-8b2a-1f0e9d8c7b6a.csv
+
+  FileInfo:
+    type: object
+    properties:
+      fileName: FileName
+      status: FileStatus
+      size:
+        description: Tamaño en bytes.
+        type: integer
+      lastModified: datetime
+    example:
+      fileName: 3f2b8c1e-7a4d-4e5b-9c0a-1d2e3f4a5b6c_9d8c7b6a-5f4e-4d3c-8b2a-1f0e9d8c7b6a.csv
+      status: pending
+      size: 112
+      lastModified: 2026-10-07T16:35:00Z
+
+  FileList:
+    type: object
+    properties:
+      files: FileInfo[]
+    example:
+      files:
+        - fileName: 3f2b8c1e-7a4d-4e5b-9c0a-1d2e3f4a5b6c_9d8c7b6a-5f4e-4d3c-8b2a-1f0e9d8c7b6a.csv
+          status: pending
+          size: 112
+          lastModified: 2026-10-07T16:35:00Z
+
+  MoveFileRequest:
+    description: Mueve un archivo desde /orders/pending hacia la carpeta indicada.
+    type: object
+    properties:
+      target:
+        type: string
+        enum: [processed, error]
+    example:
+      target: processed
+
+  # -------------------------------------------------------------- Notificación
+  NotificationRequest:
+    description: Correo a enviar a través de MagicBell.
+    type: object
+    properties:
+      recipientEmail: Email
+      title:
+        type: string
+        minLength: 1
+        maxLength: 200
+      content:
+        type: string
+        minLength: 1
+        maxLength: 2000
+      orderId:
+        type: Uuid
+        required: false
+    example:
+      recipientEmail: ana.perez@example.com
+      title: Tu pedido fue registrado
+      content: Hola Ana, tu pedido 9d8c7b6a-5f4e-4d3c-8b2a-1f0e9d8c7b6a fue registrado por un total de 2500.00 USD.
+      orderId: 9d8c7b6a-5f4e-4d3c-8b2a-1f0e9d8c7b6a
+
+  NotificationCreated:
+    description: Notificación aceptada por MagicBell.
+    type: object
+    properties:
+      notificationId: string
+      status:
+        type: string
+        enum: [ACCEPTED]
+    example:
+      notificationId: 5b1f0c2e-9a3d-4c7e-8f6b-2d1a0e9c8b7a
+      status: ACCEPTED
+
+  NotificationResult:
+    description: Resultado del procesamiento de un evento de pedido registrado.
+    type: object
+    properties:
+      orderId: Uuid
+      status:
+        description: SENT si se envió el correo. SKIPPED_NO_EMAIL si el cliente no tiene email.
+        type: string
+        enum: [SENT, SKIPPED_NO_EMAIL]
+    example:
+      orderId: 9d8c7b6a-5f4e-4d3c-8b2a-1f0e9d8c7b6a
+      status: SENT
+
+  # ----------------------------------------------------------------- Errores
+  ErrorResponse:
+    description: |
+      Modelo de error único para todas las APIs.
+      Códigos: VALIDATION_ERROR, UNAUTHORIZED, CUSTOMER_NOT_FOUND, ORDER_NOT_FOUND, FILE_NOT_FOUND,
+      PRODUCT_NOT_FOUND, CUSTOMER_ALREADY_EXISTS, FILE_ALREADY_EXISTS, PROCESS_ALREADY_RUNNING,
+      PROVIDER_NOT_SUPPORTED, PROVIDER_ERROR, SERVICE_UNAVAILABLE, INTERNAL_ERROR.
+    type: object
+    properties:
+      code:
+        type: string
+        example: CUSTOMER_NOT_FOUND
+      message:
+        type: string
+        example: El cliente no está registrado
+      correlationId:
+        description: Valor de x-correlation-id para rastrear la petición en los logs.
+        type: string
+        required: false
+      timestamp: datetime
+      retryable:
+        description: true si el consumidor puede reintentar la misma petición más tarde.
+        type: boolean
+      details:
+        description: Detalle opcional, por ejemplo los campos inválidos.
+        type: string[]
+        required: false
+    example:
+      code: CUSTOMER_NOT_FOUND
+      message: El cliente no está registrado
+      correlationId: 0b6f2f0e-4a0c-4d25-9a4c-3d9e6a7b1c2d
+      timestamp: 2026-10-07T16:35:00Z
+      retryable: false

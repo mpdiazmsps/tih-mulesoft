@@ -1,0 +1,12 @@
+# Credenciales y binarios locales (cada quien los crea a partir de los .example)
+*.local
+*.local.json
+.env
+rabbitmq/credentials.local
+sftp/rebex/
+sftp/data/
+sftp/.venv/
+sftp/credentials.local
+oracle/credentials.local
+secure/credentials.local
+magicbell/credentials.local

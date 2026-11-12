@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:secure-properties="http://www.mulesoft.org/schema/mule/secure-properties"
+	xmlns:db="http://www.mulesoft.org/schema/mule/db"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/secure-properties http://www.mulesoft.org/schema/mule/secure-properties/current/mule-secure-properties.xsd
+		http://www.mulesoft.org/schema/mule/db http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd">
+
+	<global-property name="env" value="local"
+		doc:name="Global Property"
+		doc:description="Ambiente activo. Se sobrescribe al arrancar con -Denv=dev (local es el valor por defecto)"/>
+
+	<configuration-properties file="properties/${env}-application-config.yaml"
+		doc:name="Configuration properties"
+		doc:description="Propiedades no sensibles del ambiente: puerto del listener, URL de Oracle y pool"/>
+
+	<secure-properties:config name="Secure_Properties_Config" file="properties/${env}-secure-application-config.yaml" key="${encryption.key}"
+		doc:name="Secure Properties Config"
+		doc:description="Propiedades seguras del ambiente (usuarios, claves y tokens cifrados con AES/CBC). La clave se pasa como VM argument -M-Dencryption.key">
+		<secure-properties:encrypt algorithm="AES" mode="CBC"/>
+	</secure-properties:config>
+
+	<configuration defaultErrorHandler-ref="global-error-handler"
+		doc:name="Configuration"
+		doc:description="Manejador de errores global: convierte cualquier error en el ErrorResponse del contrato"/>
+
+	<db:config name="oracle-core-db-config"
+		doc:name="Database Config"
+		doc:description="Conexión al esquema STORE_APP de Oracle (FREEPDB1). No falla el despliegue si Oracle no está disponible">
+		<db:oracle-connection host="localhost" port="1522" user="${secure::db.user}" password="${secure::db.password}" serviceName="FREEPDB1"/>
+	
+</db:config>
+
+</mule>

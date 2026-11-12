@@ -1,0 +1,56 @@
+#%Validation Profile 1.0
+# Convenciones de los RAML de TIH. Nota: el modelo de gobernanza no expone los traits (extends vacío),
+# por eso no se puede exigir el trait secured ni sus respuestas 401/500 desde aquí.
+profile: tih-raml-conventions
+validations:
+  api-has-description:
+    targetClass: apiContract.WebAPI
+    message: La API debe tener una descripción (description) que explique su propósito y su rol en la arquitectura
+    propertyConstraints:
+      core.description:
+        minCount: 1
+        minLength: 20
+  api-has-version:
+    targetClass: apiContract.WebAPI
+    message: La API debe declarar su versión (version, p. ej. v1)
+    propertyConstraints:
+      core.version:
+        minCount: 1
+        pattern: ^v[0-9]+$
+  operation-has-display-name:
+    targetClass: apiContract.Operation
+    message: Cada operación debe tener displayName
+    propertyConstraints:
+      core.name:
+        minCount: 1
+  operation-has-description:
+    targetClass: apiContract.Operation
+    message: Cada operación debe tener description
+    propertyConstraints:
+      core.description:
+        minCount: 1
+  operation-has-success-response:
+    targetClass: apiContract.Operation
+    message: Cada operación debe declarar una respuesta exitosa 2xx
+    propertyConstraints:
+      apiContract.returns:
+        atLeast:
+          count: 1
+          validation:
+            propertyConstraints:
+              apiContract.statusCode:
+                pattern: ^2[0-9]{2}$
+  response-has-description:
+    targetClass: apiContract.Response
+    message: Cada respuesta debe tener description
+    propertyConstraints:
+      core.description:
+        minCount: 1
+violation:
+  - api-has-description
+  - api-has-version
+  - operation-has-success-response
+warning:
+  - operation-has-display-name
+  - operation-has-description
+  - response-has-description

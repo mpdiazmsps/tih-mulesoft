@@ -1,0 +1,1968 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<con:soapui-project id="1d2b078d-7a58-4588-b961-c72d0dd9ee2b" activeEnvironment="Default" name="OrderService-Borland-Mock-2" resourceRoot="" soapui-version="5.10.0" abortOnError="false" runType="SEQUENTIAL" xmlns:con="http://eviware.com/soapui/config"><con:settings/><con:interface xsi:type="con:WsdlInterface" id="2b8c2ac3-385c-464f-8032-d8bc0ffba190" wsaVersion="NONE" name="OrderServiceSoap12" type="wsdl" bindingName="{http://tempuri.org/}OrderServiceSoap12" soapVersion="1_2" anonymous="optional" definition="file:/C:/Users/MaiteDiaz/Downloads/borland.wsdl" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><con:settings/><con:definitionCache type="TEXT" rootPart="file:/C:/Users/MaiteDiaz/Downloads/borland.wsdl"><con:part><con:url>file:/C:/Users/MaiteDiaz/Downloads/borland.wsdl</con:url><con:content><![CDATA[<wsdl:definitions targetNamespace="http://tempuri.org/" xmlns:s="http://www.w3.org/2001/XMLSchema" xmlns:soap12="http://schemas.xmlsoap.org/wsdl/soap12/" xmlns:mime="http://schemas.xmlsoap.org/wsdl/mime/" xmlns:tns="http://tempuri.org/" xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/" xmlns:tm="http://microsoft.com/wsdl/mime/textMatching/" xmlns:http="http://schemas.xmlsoap.org/wsdl/http/" xmlns:soapenc="http://schemas.xmlsoap.org/soap/encoding/" xmlns:wsdl="http://schemas.xmlsoap.org/wsdl/">
+  <wsdl:types>
+    <s:schema elementFormDefault="qualified" targetNamespace="http://tempuri.org/">
+      <s:element name="GetArticleById">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="ArticleId" type="s:int"/>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetArticleByIdResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetArticleByIdResult" type="tns:Article"/>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:complexType name="Article">
+        <s:sequence>
+          <s:element minOccurs="1" maxOccurs="1" name="ArticleId" type="s:int"/>
+          <s:element minOccurs="0" maxOccurs="1" name="Name" type="s:string"/>
+          <s:element minOccurs="1" maxOccurs="1" name="Price" type="s:double"/>
+        </s:sequence>
+      </s:complexType>
+      <s:element name="GetArticleByName">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="ArticleName" type="s:string"/>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetArticleByNameResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetArticleByNameResult" type="tns:Article"/>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="SearchArticles">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="ArticleNamePattern" type="s:string"/>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="SearchArticlesResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="SearchArticlesResult" type="tns:ArrayOfArticle"/>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:complexType name="ArrayOfArticle">
+        <s:sequence>
+          <s:element minOccurs="0" maxOccurs="unbounded" name="Article" nillable="true" type="tns:Article"/>
+        </s:sequence>
+      </s:complexType>
+      <s:element name="CreateUser">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="Username" type="s:string"/>
+            <s:element minOccurs="0" maxOccurs="1" name="Password" type="s:string"/>
+            <s:element minOccurs="0" maxOccurs="1" name="FirstName" type="s:string"/>
+            <s:element minOccurs="0" maxOccurs="1" name="LastName" type="s:string"/>
+            <s:element minOccurs="0" maxOccurs="1" name="Street" type="s:string"/>
+            <s:element minOccurs="0" maxOccurs="1" name="City" type="s:string"/>
+            <s:element minOccurs="0" maxOccurs="1" name="ZIP" type="s:string"/>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="CreateUserResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="CreateUserResult" type="s:boolean"/>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="DeleteUser">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="Username" type="s:string"/>
+            <s:element minOccurs="0" maxOccurs="1" name="Password" type="s:string"/>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="DeleteUserResponse">
+        <s:complexType/>
+      </s:element>
+      <s:element name="Login">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="Username" type="s:string"/>
+            <s:element minOccurs="0" maxOccurs="1" name="Password" type="s:string"/>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="LoginResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="LoginResult" type="s:int"/>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="Logout">
+        <s:complexType/>
+      </s:element>
+      <s:element name="LogoutResponse">
+        <s:complexType/>
+      </s:element>
+      <s:element name="GetOrders">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="UserId" type="s:int"/>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetOrdersResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetOrdersResult" type="tns:ArrayOfInt"/>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:complexType name="ArrayOfInt">
+        <s:sequence>
+          <s:element minOccurs="0" maxOccurs="unbounded" name="int" type="s:int"/>
+        </s:sequence>
+      </s:complexType>
+      <s:element name="GetOrderById">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="UserId" type="s:int"/>
+            <s:element minOccurs="1" maxOccurs="1" name="OrderId" type="s:int"/>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetOrderByIdResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetOrderByIdResult" type="tns:Order"/>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:complexType name="Order">
+        <s:sequence>
+          <s:element minOccurs="1" maxOccurs="1" name="UserId" type="s:int"/>
+          <s:element minOccurs="1" maxOccurs="1" name="OrderId" type="s:int"/>
+          <s:element minOccurs="0" maxOccurs="unbounded" name="OrderItems"/>
+          <s:element minOccurs="1" maxOccurs="1" name="Status" type="tns:OrderStatus"/>
+        </s:sequence>
+      </s:complexType>
+      <s:simpleType name="OrderStatus">
+        <s:restriction base="s:string">
+          <s:enumeration value="InProgress"/>
+          <s:enumeration value="Ordered"/>
+          <s:enumeration value="Delivered"/>
+          <s:enumeration value="Canceled"/>
+        </s:restriction>
+      </s:simpleType>
+      <s:element name="CreateNewOrder">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="UserId" type="s:int"/>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="CreateNewOrderResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="CreateNewOrderResult" type="tns:Order"/>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="DeleteOrder">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="UserId" type="s:int"/>
+            <s:element minOccurs="1" maxOccurs="1" name="OrderId" type="s:int"/>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="DeleteOrderResponse">
+        <s:complexType/>
+      </s:element>
+      <s:element name="AddOrderItem">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="UserId" type="s:int"/>
+            <s:element minOccurs="1" maxOccurs="1" name="OrderId" type="s:int"/>
+            <s:element minOccurs="1" maxOccurs="1" name="ArticleId" type="s:int"/>
+            <s:element minOccurs="1" maxOccurs="1" name="Amount" type="s:int"/>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="AddOrderItemResponse">
+        <s:complexType/>
+      </s:element>
+      <s:element name="GetOrderPrice">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="UserId" type="s:int"/>
+            <s:element minOccurs="1" maxOccurs="1" name="OrderId" type="s:int"/>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetOrderPriceResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="GetOrderPriceResult" type="s:double"/>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetOrderItem">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="UserId" type="s:int"/>
+            <s:element minOccurs="1" maxOccurs="1" name="OrderId" type="s:int"/>
+            <s:element minOccurs="1" maxOccurs="1" name="ItemPosition" type="s:int"/>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:complexType name="OrderItem">
+        <s:sequence>
+          <s:element minOccurs="1" maxOccurs="1" name="ArticleId" type="s:int"/>
+          <s:element minOccurs="1" maxOccurs="1" name="Amount" type="s:int"/>
+          <s:element minOccurs="1" maxOccurs="1" name="SinglePrice" type="s:double"/>
+          <s:element minOccurs="1" maxOccurs="1" name="Price" type="s:double"/>
+        </s:sequence>
+      </s:complexType>
+      <s:element name="GetOrderItemResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetOrderItemResult" type="tns:OrderItem"/>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="RemoveOrderItem">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="UserId" type="s:int"/>
+            <s:element minOccurs="1" maxOccurs="1" name="OrderId" type="s:int"/>
+            <s:element minOccurs="1" maxOccurs="1" name="ItemPosition" type="s:int"/>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="RemoveOrderItemResponse">
+        <s:complexType/>
+      </s:element>
+      <s:element name="GetOrderItemCount">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="UserId" type="s:int"/>
+            <s:element minOccurs="1" maxOccurs="1" name="OrderId" type="s:int"/>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetOrderItemCountResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="GetOrderItemCountResult" type="s:int"/>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="ChangeOrderStatus">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="UserId" type="s:int"/>
+            <s:element minOccurs="1" maxOccurs="1" name="OrderId" type="s:int"/>
+            <s:element minOccurs="1" maxOccurs="1" name="NewStatus" type="tns:OrderStatus"/>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="ChangeOrderStatusResponse">
+        <s:complexType/>
+      </s:element>
+    </s:schema>
+  </wsdl:types>
+  <wsdl:message name="GetArticleByIdSoapIn">
+    <wsdl:part name="parameters" element="tns:GetArticleById"/>
+  </wsdl:message>
+  <wsdl:message name="GetArticleByIdSoapOut">
+    <wsdl:part name="parameters" element="tns:GetArticleByIdResponse"/>
+  </wsdl:message>
+  <wsdl:message name="GetArticleByNameSoapIn">
+    <wsdl:part name="parameters" element="tns:GetArticleByName"/>
+  </wsdl:message>
+  <wsdl:message name="GetArticleByNameSoapOut">
+    <wsdl:part name="parameters" element="tns:GetArticleByNameResponse"/>
+  </wsdl:message>
+  <wsdl:message name="SearchArticlesSoapIn">
+    <wsdl:part name="parameters" element="tns:SearchArticles"/>
+  </wsdl:message>
+  <wsdl:message name="SearchArticlesSoapOut">
+    <wsdl:part name="parameters" element="tns:SearchArticlesResponse"/>
+  </wsdl:message>
+  <wsdl:message name="CreateUserSoapIn">
+    <wsdl:part name="parameters" element="tns:CreateUser"/>
+  </wsdl:message>
+  <wsdl:message name="CreateUserSoapOut">
+    <wsdl:part name="parameters" element="tns:CreateUserResponse"/>
+  </wsdl:message>
+  <wsdl:message name="DeleteUserSoapIn">
+    <wsdl:part name="parameters" element="tns:DeleteUser"/>
+  </wsdl:message>
+  <wsdl:message name="DeleteUserSoapOut">
+    <wsdl:part name="parameters" element="tns:DeleteUserResponse"/>
+  </wsdl:message>
+  <wsdl:message name="LoginSoapIn">
+    <wsdl:part name="parameters" element="tns:Login"/>
+  </wsdl:message>
+  <wsdl:message name="LoginSoapOut">
+    <wsdl:part name="parameters" element="tns:LoginResponse"/>
+  </wsdl:message>
+  <wsdl:message name="LogoutSoapIn">
+    <wsdl:part name="parameters" element="tns:Logout"/>
+  </wsdl:message>
+  <wsdl:message name="LogoutSoapOut">
+    <wsdl:part name="parameters" element="tns:LogoutResponse"/>
+  </wsdl:message>
+  <wsdl:message name="GetOrdersSoapIn">
+    <wsdl:part name="parameters" element="tns:GetOrders"/>
+  </wsdl:message>
+  <wsdl:message name="GetOrdersSoapOut">
+    <wsdl:part name="parameters" element="tns:GetOrdersResponse"/>
+  </wsdl:message>
+  <wsdl:message name="GetOrderByIdSoapIn">
+    <wsdl:part name="parameters" element="tns:GetOrderById"/>
+  </wsdl:message>
+  <wsdl:message name="GetOrderByIdSoapOut">
+    <wsdl:part name="parameters" element="tns:GetOrderByIdResponse"/>
+  </wsdl:message>
+  <wsdl:message name="CreateNewOrderSoapIn">
+    <wsdl:part name="parameters" element="tns:CreateNewOrder"/>
+  </wsdl:message>
+  <wsdl:message name="CreateNewOrderSoapOut">
+    <wsdl:part name="parameters" element="tns:CreateNewOrderResponse"/>
+  </wsdl:message>
+  <wsdl:message name="DeleteOrderSoapIn">
+    <wsdl:part name="parameters" element="tns:DeleteOrder"/>
+  </wsdl:message>
+  <wsdl:message name="DeleteOrderSoapOut">
+    <wsdl:part name="parameters" element="tns:DeleteOrderResponse"/>
+  </wsdl:message>
+  <wsdl:message name="AddOrderItemSoapIn">
+    <wsdl:part name="parameters" element="tns:AddOrderItem"/>
+  </wsdl:message>
+  <wsdl:message name="AddOrderItemSoapOut">
+    <wsdl:part name="parameters" element="tns:AddOrderItemResponse"/>
+  </wsdl:message>
+  <wsdl:message name="GetOrderPriceSoapIn">
+    <wsdl:part name="parameters" element="tns:GetOrderPrice"/>
+  </wsdl:message>
+  <wsdl:message name="GetOrderPriceSoapOut">
+    <wsdl:part name="parameters" element="tns:GetOrderPriceResponse"/>
+  </wsdl:message>
+  <wsdl:message name="GetOrderItemSoapIn">
+    <wsdl:part name="parameters" element="tns:GetOrderItem"/>
+  </wsdl:message>
+  <wsdl:message name="GetOrderItemSoapOut">
+    <wsdl:part name="parameters" element="tns:GetOrderItemResponse"/>
+  </wsdl:message>
+  <wsdl:message name="RemoveOrderItemSoapIn">
+    <wsdl:part name="parameters" element="tns:RemoveOrderItem"/>
+  </wsdl:message>
+  <wsdl:message name="RemoveOrderItemSoapOut">
+    <wsdl:part name="parameters" element="tns:RemoveOrderItemResponse"/>
+  </wsdl:message>
+  <wsdl:message name="GetOrderItemCountSoapIn">
+    <wsdl:part name="parameters" element="tns:GetOrderItemCount"/>
+  </wsdl:message>
+  <wsdl:message name="GetOrderItemCountSoapOut">
+    <wsdl:part name="parameters" element="tns:GetOrderItemCountResponse"/>
+  </wsdl:message>
+  <wsdl:message name="ChangeOrderStatusSoapIn">
+    <wsdl:part name="parameters" element="tns:ChangeOrderStatus"/>
+  </wsdl:message>
+  <wsdl:message name="ChangeOrderStatusSoapOut">
+    <wsdl:part name="parameters" element="tns:ChangeOrderStatusResponse"/>
+  </wsdl:message>
+  <wsdl:portType name="OrderServiceSoap">
+    <wsdl:operation name="GetArticleById">
+      <wsdl:input message="tns:GetArticleByIdSoapIn"/>
+      <wsdl:output message="tns:GetArticleByIdSoapOut"/>
+    </wsdl:operation>
+    <wsdl:operation name="GetArticleByName">
+      <wsdl:input message="tns:GetArticleByNameSoapIn"/>
+      <wsdl:output message="tns:GetArticleByNameSoapOut"/>
+    </wsdl:operation>
+    <wsdl:operation name="SearchArticles">
+      <wsdl:input message="tns:SearchArticlesSoapIn"/>
+      <wsdl:output message="tns:SearchArticlesSoapOut"/>
+    </wsdl:operation>
+    <wsdl:operation name="CreateUser">
+      <wsdl:input message="tns:CreateUserSoapIn"/>
+      <wsdl:output message="tns:CreateUserSoapOut"/>
+    </wsdl:operation>
+    <wsdl:operation name="DeleteUser">
+      <wsdl:input message="tns:DeleteUserSoapIn"/>
+      <wsdl:output message="tns:DeleteUserSoapOut"/>
+    </wsdl:operation>
+    <wsdl:operation name="Login">
+      <wsdl:input message="tns:LoginSoapIn"/>
+      <wsdl:output message="tns:LoginSoapOut"/>
+    </wsdl:operation>
+    <wsdl:operation name="Logout">
+      <wsdl:input message="tns:LogoutSoapIn"/>
+      <wsdl:output message="tns:LogoutSoapOut"/>
+    </wsdl:operation>
+    <wsdl:operation name="GetOrders">
+      <wsdl:input message="tns:GetOrdersSoapIn"/>
+      <wsdl:output message="tns:GetOrdersSoapOut"/>
+    </wsdl:operation>
+    <wsdl:operation name="GetOrderById">
+      <wsdl:input message="tns:GetOrderByIdSoapIn"/>
+      <wsdl:output message="tns:GetOrderByIdSoapOut"/>
+    </wsdl:operation>
+    <wsdl:operation name="CreateNewOrder">
+      <wsdl:input message="tns:CreateNewOrderSoapIn"/>
+      <wsdl:output message="tns:CreateNewOrderSoapOut"/>
+    </wsdl:operation>
+    <wsdl:operation name="DeleteOrder">
+      <wsdl:input message="tns:DeleteOrderSoapIn"/>
+      <wsdl:output message="tns:DeleteOrderSoapOut"/>
+    </wsdl:operation>
+    <wsdl:operation name="AddOrderItem">
+      <wsdl:input message="tns:AddOrderItemSoapIn"/>
+      <wsdl:output message="tns:AddOrderItemSoapOut"/>
+    </wsdl:operation>
+    <wsdl:operation name="GetOrderPrice">
+      <wsdl:input message="tns:GetOrderPriceSoapIn"/>
+      <wsdl:output message="tns:GetOrderPriceSoapOut"/>
+    </wsdl:operation>
+    <wsdl:operation name="GetOrderItem">
+      <wsdl:input message="tns:GetOrderItemSoapIn"/>
+      <wsdl:output message="tns:GetOrderItemSoapOut"/>
+    </wsdl:operation>
+    <wsdl:operation name="RemoveOrderItem">
+      <wsdl:input message="tns:RemoveOrderItemSoapIn"/>
+      <wsdl:output message="tns:RemoveOrderItemSoapOut"/>
+    </wsdl:operation>
+    <wsdl:operation name="GetOrderItemCount">
+      <wsdl:input message="tns:GetOrderItemCountSoapIn"/>
+      <wsdl:output message="tns:GetOrderItemCountSoapOut"/>
+    </wsdl:operation>
+    <wsdl:operation name="ChangeOrderStatus">
+      <wsdl:input message="tns:ChangeOrderStatusSoapIn"/>
+      <wsdl:output message="tns:ChangeOrderStatusSoapOut"/>
+    </wsdl:operation>
+  </wsdl:portType>
+  <wsdl:binding name="OrderServiceSoap" type="tns:OrderServiceSoap">
+    <soap:binding transport="http://schemas.xmlsoap.org/soap/http"/>
+    <wsdl:operation name="GetArticleById">
+      <soap:operation soapAction="http://tempuri.org/GetArticleById" style="document"/>
+      <wsdl:input>
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetArticleByName">
+      <soap:operation soapAction="http://tempuri.org/GetArticleByName" style="document"/>
+      <wsdl:input>
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="SearchArticles">
+      <soap:operation soapAction="http://tempuri.org/SearchArticles" style="document"/>
+      <wsdl:input>
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="CreateUser">
+      <soap:operation soapAction="http://tempuri.org/CreateUser" style="document"/>
+      <wsdl:input>
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="DeleteUser">
+      <soap:operation soapAction="http://tempuri.org/DeleteUser" style="document"/>
+      <wsdl:input>
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="Login">
+      <soap:operation soapAction="http://tempuri.org/Login" style="document"/>
+      <wsdl:input>
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="Logout">
+      <soap:operation soapAction="http://tempuri.org/Logout" style="document"/>
+      <wsdl:input>
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetOrders">
+      <soap:operation soapAction="http://tempuri.org/GetOrders" style="document"/>
+      <wsdl:input>
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetOrderById">
+      <soap:operation soapAction="http://tempuri.org/GetOrderById" style="document"/>
+      <wsdl:input>
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="CreateNewOrder">
+      <soap:operation soapAction="http://tempuri.org/CreateNewOrder" style="document"/>
+      <wsdl:input>
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="DeleteOrder">
+      <soap:operation soapAction="http://tempuri.org/DeleteOrder" style="document"/>
+      <wsdl:input>
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="AddOrderItem">
+      <soap:operation soapAction="http://tempuri.org/AddOrderItem" style="document"/>
+      <wsdl:input>
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetOrderPrice">
+      <soap:operation soapAction="http://tempuri.org/GetOrderPrice" style="document"/>
+      <wsdl:input>
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetOrderItem">
+      <soap:operation soapAction="http://tempuri.org/GetOrderItem" style="document"/>
+      <wsdl:input>
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="RemoveOrderItem">
+      <soap:operation soapAction="http://tempuri.org/RemoveOrderItem" style="document"/>
+      <wsdl:input>
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetOrderItemCount">
+      <soap:operation soapAction="http://tempuri.org/GetOrderItemCount" style="document"/>
+      <wsdl:input>
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="ChangeOrderStatus">
+      <soap:operation soapAction="http://tempuri.org/ChangeOrderStatus" style="document"/>
+      <wsdl:input>
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+  </wsdl:binding>
+  <wsdl:binding name="OrderServiceSoap12" type="tns:OrderServiceSoap">
+    <soap12:binding transport="http://schemas.xmlsoap.org/soap/http"/>
+    <wsdl:operation name="GetArticleById">
+      <soap12:operation soapAction="http://tempuri.org/GetArticleById" style="document"/>
+      <wsdl:input>
+        <soap12:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetArticleByName">
+      <soap12:operation soapAction="http://tempuri.org/GetArticleByName" style="document"/>
+      <wsdl:input>
+        <soap12:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="SearchArticles">
+      <soap12:operation soapAction="http://tempuri.org/SearchArticles" style="document"/>
+      <wsdl:input>
+        <soap12:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="CreateUser">
+      <soap12:operation soapAction="http://tempuri.org/CreateUser" style="document"/>
+      <wsdl:input>
+        <soap12:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="DeleteUser">
+      <soap12:operation soapAction="http://tempuri.org/DeleteUser" style="document"/>
+      <wsdl:input>
+        <soap12:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="Login">
+      <soap12:operation soapAction="http://tempuri.org/Login" style="document"/>
+      <wsdl:input>
+        <soap12:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="Logout">
+      <soap12:operation soapAction="http://tempuri.org/Logout" style="document"/>
+      <wsdl:input>
+        <soap12:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetOrders">
+      <soap12:operation soapAction="http://tempuri.org/GetOrders" style="document"/>
+      <wsdl:input>
+        <soap12:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetOrderById">
+      <soap12:operation soapAction="http://tempuri.org/GetOrderById" style="document"/>
+      <wsdl:input>
+        <soap12:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="CreateNewOrder">
+      <soap12:operation soapAction="http://tempuri.org/CreateNewOrder" style="document"/>
+      <wsdl:input>
+        <soap12:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="DeleteOrder">
+      <soap12:operation soapAction="http://tempuri.org/DeleteOrder" style="document"/>
+      <wsdl:input>
+        <soap12:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="AddOrderItem">
+      <soap12:operation soapAction="http://tempuri.org/AddOrderItem" style="document"/>
+      <wsdl:input>
+        <soap12:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetOrderPrice">
+      <soap12:operation soapAction="http://tempuri.org/GetOrderPrice" style="document"/>
+      <wsdl:input>
+        <soap12:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetOrderItem">
+      <soap12:operation soapAction="http://tempuri.org/GetOrderItem" style="document"/>
+      <wsdl:input>
+        <soap12:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="RemoveOrderItem">
+      <soap12:operation soapAction="http://tempuri.org/RemoveOrderItem" style="document"/>
+      <wsdl:input>
+        <soap12:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetOrderItemCount">
+      <soap12:operation soapAction="http://tempuri.org/GetOrderItemCount" style="document"/>
+      <wsdl:input>
+        <soap12:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="ChangeOrderStatus">
+      <soap12:operation soapAction="http://tempuri.org/ChangeOrderStatus" style="document"/>
+      <wsdl:input>
+        <soap12:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+  </wsdl:binding>
+  <wsdl:service name="OrderService">
+    <wsdl:port name="OrderServiceSoap" binding="tns:OrderServiceSoap">
+      <soap:address location="https://demo.borland.com/OrderWebServiceEx/OrderService.asmx"/>
+    </wsdl:port>
+    <wsdl:port name="OrderServiceSoap12" binding="tns:OrderServiceSoap12">
+      <soap12:address location="https://demo.borland.com/OrderWebServiceEx/OrderService.asmx"/>
+    </wsdl:port>
+  </wsdl:service>
+</wsdl:definitions>]]></con:content><con:type>http://schemas.xmlsoap.org/wsdl/</con:type></con:part></con:definitionCache><con:endpoints><con:endpoint>http://jhernandez8fs3:8088/mockOrderServiceSoap12</con:endpoint><con:endpoint>https://demo.borland.com/OrderWebServiceEx/OrderService.asmx</con:endpoint></con:endpoints><con:operation id="33ec2d1f-54b6-42da-9c40-890301f25bc2" isOneWay="false" action="http://tempuri.org/AddOrderItem" name="AddOrderItem" bindingOperationName="AddOrderItem" type="Request-Response" inputName="" receivesAttachments="false" sendsAttachments="false" anonymous="optional"><con:settings/><con:call id="074d4f68-96b0-407b-9910-3e2a6e433ff3" name="Request 1"><con:settings/><con:encoding>UTF-8</con:encoding><con:endpoint>https://demo.borland.com/OrderWebServiceEx/OrderService.asmx</con:endpoint><con:request><![CDATA[<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope" xmlns:tem="http://tempuri.org/">\r
+   <soap:Header/>\r
+   <soap:Body>\r
+      <tem:AddOrderItem>\r
+         <tem:UserId>?</tem:UserId>\r
+         <tem:OrderId>?</tem:OrderId>\r
+         <tem:ArticleId>?</tem:ArticleId>\r
+         <tem:Amount>?</tem:Amount>\r
+      </tem:AddOrderItem>\r
+   </soap:Body>\r
+</soap:Envelope>]]></con:request><con:wsaConfig mustUnderstand="NONE" version="200508" action="http://tempuri.org/OrderServiceSoap/AddOrderItemRequest"/></con:call></con:operation><con:operation id="18837b36-7514-465e-a36c-7b2abb35a169" isOneWay="false" action="http://tempuri.org/ChangeOrderStatus" name="ChangeOrderStatus" bindingOperationName="ChangeOrderStatus" type="Request-Response" inputName="" receivesAttachments="false" sendsAttachments="false" anonymous="optional"><con:settings/><con:call id="e82ed839-17db-40e7-8c52-fb700b76740a" name="Request 1"><con:settings/><con:encoding>UTF-8</con:encoding><con:endpoint>https://demo.borland.com/OrderWebServiceEx/OrderService.asmx</con:endpoint><con:request><![CDATA[<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope" xmlns:tem="http://tempuri.org/">\r
+   <soap:Header/>\r
+   <soap:Body>\r
+      <tem:ChangeOrderStatus>\r
+         <tem:UserId>?</tem:UserId>\r
+         <tem:OrderId>?</tem:OrderId>\r
+         <tem:NewStatus>?</tem:NewStatus>\r
+      </tem:ChangeOrderStatus>\r
+   </soap:Body>\r
+</soap:Envelope>]]></con:request><con:wsaConfig mustUnderstand="NONE" version="200508" action="http://tempuri.org/OrderServiceSoap/ChangeOrderStatusRequest"/></con:call></con:operation><con:operation id="a2058fa7-4a4a-4f60-9435-69c83bb04fbe" isOneWay="false" action="http://tempuri.org/CreateNewOrder" name="CreateNewOrder" bindingOperationName="CreateNewOrder" type="Request-Response" inputName="" receivesAttachments="false" sendsAttachments="false" anonymous="optional"><con:settings/><con:call id="602a7caf-face-462d-bc7a-e240a888b2e1" name="Request 1"><con:settings/><con:encoding>UTF-8</con:encoding><con:endpoint>https://demo.borland.com/OrderWebServiceEx/OrderService.asmx</con:endpoint><con:request><![CDATA[<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope" xmlns:tem="http://tempuri.org/">\r
+   <soap:Header/>\r
+   <soap:Body>\r
+      <tem:CreateNewOrder>\r
+         <tem:UserId>?</tem:UserId>\r
+      </tem:CreateNewOrder>\r
+   </soap:Body>\r
+</soap:Envelope>]]></con:request><con:wsaConfig mustUnderstand="NONE" version="200508" action="http://tempuri.org/OrderServiceSoap/CreateNewOrderRequest"/></con:call></con:operation><con:operation id="62649ba6-ab75-438c-82d5-88bfc11f4657" isOneWay="false" action="http://tempuri.org/CreateUser" name="CreateUser" bindingOperationName="CreateUser" type="Request-Response" inputName="" receivesAttachments="false" sendsAttachments="false" anonymous="optional"><con:settings/><con:call id="2ed30844-3835-4055-8244-a64ff4ccb2f5" name="Request 1"><con:settings/><con:encoding>UTF-8</con:encoding><con:endpoint>https://demo.borland.com/OrderWebServiceEx/OrderService.asmx</con:endpoint><con:request><![CDATA[<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope" xmlns:tem="http://tempuri.org/">\r
+   <soap:Header/>\r
+   <soap:Body>\r
+      <tem:CreateUser>\r
+         <!--Optional:-->\r
+         <tem:Username>?</tem:Username>\r
+         <!--Optional:-->\r
+         <tem:Password>?</tem:Password>\r
+         <!--Optional:-->\r
+         <tem:FirstName>?</tem:FirstName>\r
+         <!--Optional:-->\r
+         <tem:LastName>?</tem:LastName>\r
+         <!--Optional:-->\r
+         <tem:Street>?</tem:Street>\r
+         <!--Optional:-->\r
+         <tem:City>?</tem:City>\r
+         <!--Optional:-->\r
+         <tem:ZIP>?</tem:ZIP>\r
+      </tem:CreateUser>\r
+   </soap:Body>\r
+</soap:Envelope>]]></con:request><con:wsaConfig mustUnderstand="NONE" version="200508" action="http://tempuri.org/OrderServiceSoap/CreateUserRequest"/></con:call></con:operation><con:operation id="bfa596fb-70ac-4623-b154-409a1244ae54" isOneWay="false" action="http://tempuri.org/DeleteOrder" name="DeleteOrder" bindingOperationName="DeleteOrder" type="Request-Response" inputName="" receivesAttachments="false" sendsAttachments="false" anonymous="optional"><con:settings/><con:call id="7be227d2-6517-49c9-abe3-fb6e0a7cb7bf" name="Request 1"><con:settings/><con:encoding>UTF-8</con:encoding><con:endpoint>https://demo.borland.com/OrderWebServiceEx/OrderService.asmx</con:endpoint><con:request><![CDATA[<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope" xmlns:tem="http://tempuri.org/">\r
+   <soap:Header/>\r
+   <soap:Body>\r
+      <tem:DeleteOrder>\r
+         <tem:UserId>?</tem:UserId>\r
+         <tem:OrderId>?</tem:OrderId>\r
+      </tem:DeleteOrder>\r
+   </soap:Body>\r
+</soap:Envelope>]]></con:request><con:wsaConfig mustUnderstand="NONE" version="200508" action="http://tempuri.org/OrderServiceSoap/DeleteOrderRequest"/></con:call></con:operation><con:operation id="9911ea3b-012e-4505-a3ad-529d308cdb0e" isOneWay="false" action="http://tempuri.org/DeleteUser" name="DeleteUser" bindingOperationName="DeleteUser" type="Request-Response" inputName="" receivesAttachments="false" sendsAttachments="false" anonymous="optional"><con:settings/><con:call id="75b203ed-f086-4b9f-99ae-e370b306bfca" name="Request 1"><con:settings/><con:encoding>UTF-8</con:encoding><con:endpoint>https://demo.borland.com/OrderWebServiceEx/OrderService.asmx</con:endpoint><con:request><![CDATA[<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope" xmlns:tem="http://tempuri.org/">\r
+   <soap:Header/>\r
+   <soap:Body>\r
+      <tem:DeleteUser>\r
+         <!--Optional:-->\r
+         <tem:Username>?</tem:Username>\r
+         <!--Optional:-->\r
+         <tem:Password>?</tem:Password>\r
+      </tem:DeleteUser>\r
+   </soap:Body>\r
+</soap:Envelope>]]></con:request><con:wsaConfig mustUnderstand="NONE" version="200508" action="http://tempuri.org/OrderServiceSoap/DeleteUserRequest"/></con:call></con:operation><con:operation id="d2fcc6ca-27ee-4b24-9422-9b0fe3467214" isOneWay="false" action="http://tempuri.org/GetArticleById" name="GetArticleById" bindingOperationName="GetArticleById" type="Request-Response" inputName="" receivesAttachments="false" sendsAttachments="false" anonymous="optional"><con:settings/><con:call id="d369cfbd-6f78-4f34-99ee-793a967ee547" name="Request 1"><con:settings/><con:encoding>UTF-8</con:encoding><con:endpoint>https://demo.borland.com/OrderWebServiceEx/OrderService.asmx</con:endpoint><con:request><![CDATA[<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope" xmlns:tem="http://tempuri.org/">\r
+   <soap:Header/>\r
+   <soap:Body>\r
+      <tem:GetArticleById>\r
+         <tem:ArticleId>?</tem:ArticleId>\r
+      </tem:GetArticleById>\r
+   </soap:Body>\r
+</soap:Envelope>]]></con:request><con:wsaConfig mustUnderstand="NONE" version="200508" action="http://tempuri.org/OrderServiceSoap/GetArticleByIdRequest"/></con:call></con:operation><con:operation id="e09b053e-c57e-4ee1-bdf8-b8bd82f38bf9" isOneWay="false" action="http://tempuri.org/GetArticleByName" name="GetArticleByName" bindingOperationName="GetArticleByName" type="Request-Response" inputName="" receivesAttachments="false" sendsAttachments="false" anonymous="optional"><con:settings/><con:call id="f469eada-ba94-46e0-833b-f3fbadae3273" name="Request 1"><con:settings/><con:encoding>UTF-8</con:encoding><con:endpoint>https://demo.borland.com/OrderWebServiceEx/OrderService.asmx</con:endpoint><con:request><![CDATA[<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope" xmlns:tem="http://tempuri.org/">\r
+   <soap:Header/>\r
+   <soap:Body>\r
+      <tem:GetArticleByName>\r
+         <!--Optional:-->\r
+         <tem:ArticleName>?</tem:ArticleName>\r
+      </tem:GetArticleByName>\r
+   </soap:Body>\r
+</soap:Envelope>]]></con:request><con:wsaConfig mustUnderstand="NONE" version="200508" action="http://tempuri.org/OrderServiceSoap/GetArticleByNameRequest"/></con:call></con:operation><con:operation id="d76c2f1b-75e2-4c7b-aa8c-31bc3a29183a" isOneWay="false" action="http://tempuri.org/GetOrderById" name="GetOrderById" bindingOperationName="GetOrderById" type="Request-Response" inputName="" receivesAttachments="false" sendsAttachments="false" anonymous="optional"><con:settings/><con:call id="e7fc6071-68c6-43a8-a9f6-894ad6a64faf" name="Request 1"><con:settings/><con:encoding>UTF-8</con:encoding><con:endpoint>https://demo.borland.com/OrderWebServiceEx/OrderService.asmx</con:endpoint><con:request><![CDATA[<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope" xmlns:tem="http://tempuri.org/">\r
+   <soap:Header/>\r
+   <soap:Body>\r
+      <tem:GetOrderById>\r
+         <tem:UserId>?</tem:UserId>\r
+         <tem:OrderId>?</tem:OrderId>\r
+      </tem:GetOrderById>\r
+   </soap:Body>\r
+</soap:Envelope>]]></con:request><con:wsaConfig mustUnderstand="NONE" version="200508" action="http://tempuri.org/OrderServiceSoap/GetOrderByIdRequest"/></con:call></con:operation><con:operation id="593ee3a8-7c1a-4cbb-b69b-fd5c43f0975a" isOneWay="false" action="http://tempuri.org/GetOrderItem" name="GetOrderItem" bindingOperationName="GetOrderItem" type="Request-Response" inputName="" receivesAttachments="false" sendsAttachments="false" anonymous="optional"><con:settings/><con:call id="2d075d2e-8ef5-4991-ab04-2dbf75a955c6" name="Request 1"><con:settings/><con:encoding>UTF-8</con:encoding><con:endpoint>https://demo.borland.com/OrderWebServiceEx/OrderService.asmx</con:endpoint><con:request><![CDATA[<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope" xmlns:tem="http://tempuri.org/">\r
+   <soap:Header/>\r
+   <soap:Body>\r
+      <tem:GetOrderItem>\r
+         <tem:UserId>?</tem:UserId>\r
+         <tem:OrderId>?</tem:OrderId>\r
+         <tem:ItemPosition>?</tem:ItemPosition>\r
+      </tem:GetOrderItem>\r
+   </soap:Body>\r
+</soap:Envelope>]]></con:request><con:wsaConfig mustUnderstand="NONE" version="200508" action="http://tempuri.org/OrderServiceSoap/GetOrderItemRequest"/></con:call></con:operation><con:operation id="9b3d2929-76dd-4c7c-88f8-cf79f11815c4" isOneWay="false" action="http://tempuri.org/GetOrderItemCount" name="GetOrderItemCount" bindingOperationName="GetOrderItemCount" type="Request-Response" inputName="" receivesAttachments="false" sendsAttachments="false" anonymous="optional"><con:settings/><con:call id="430b58ae-19a2-4df0-9a91-23fb96768eca" name="Request 1"><con:settings/><con:encoding>UTF-8</con:encoding><con:endpoint>https://demo.borland.com/OrderWebServiceEx/OrderService.asmx</con:endpoint><con:request><![CDATA[<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope" xmlns:tem="http://tempuri.org/">\r
+   <soap:Header/>\r
+   <soap:Body>\r
+      <tem:GetOrderItemCount>\r
+         <tem:UserId>?</tem:UserId>\r
+         <tem:OrderId>?</tem:OrderId>\r
+      </tem:GetOrderItemCount>\r
+   </soap:Body>\r
+</soap:Envelope>]]></con:request><con:wsaConfig mustUnderstand="NONE" version="200508" action="http://tempuri.org/OrderServiceSoap/GetOrderItemCountRequest"/></con:call></con:operation><con:operation id="20506a34-7b08-475c-8276-2efa42e89802" isOneWay="false" action="http://tempuri.org/GetOrderPrice" name="GetOrderPrice" bindingOperationName="GetOrderPrice" type="Request-Response" inputName="" receivesAttachments="false" sendsAttachments="false" anonymous="optional"><con:settings/><con:call id="393df409-e9fd-4172-9109-a6e1104ffecf" name="Request 1"><con:settings/><con:encoding>UTF-8</con:encoding><con:endpoint>https://demo.borland.com/OrderWebServiceEx/OrderService.asmx</con:endpoint><con:request><![CDATA[<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope" xmlns:tem="http://tempuri.org/">\r
+   <soap:Header/>\r
+   <soap:Body>\r
+      <tem:GetOrderPrice>\r
+         <tem:UserId>?</tem:UserId>\r
+         <tem:OrderId>?</tem:OrderId>\r
+      </tem:GetOrderPrice>\r
+   </soap:Body>\r
+</soap:Envelope>]]></con:request><con:wsaConfig mustUnderstand="NONE" version="200508" action="http://tempuri.org/OrderServiceSoap/GetOrderPriceRequest"/></con:call></con:operation><con:operation id="3d07271d-dd15-4586-aa4e-70ab476417f9" isOneWay="false" action="http://tempuri.org/GetOrders" name="GetOrders" bindingOperationName="GetOrders" type="Request-Response" inputName="" receivesAttachments="false" sendsAttachments="false" anonymous="optional"><con:settings/><con:call id="b02000fb-e11a-45e0-8d9c-d6b06dc58185" name="Request 1"><con:settings/><con:encoding>UTF-8</con:encoding><con:endpoint>https://demo.borland.com/OrderWebServiceEx/OrderService.asmx</con:endpoint><con:request><![CDATA[<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope" xmlns:tem="http://tempuri.org/">\r
+   <soap:Header/>\r
+   <soap:Body>\r
+      <tem:GetOrders>\r
+         <tem:UserId>?</tem:UserId>\r
+      </tem:GetOrders>\r
+   </soap:Body>\r
+</soap:Envelope>]]></con:request><con:wsaConfig mustUnderstand="NONE" version="200508" action="http://tempuri.org/OrderServiceSoap/GetOrdersRequest"/></con:call></con:operation><con:operation id="5a0a3ce4-0bf5-4601-a0dc-31ce8a648919" isOneWay="false" action="http://tempuri.org/Login" name="Login" bindingOperationName="Login" type="Request-Response" inputName="" receivesAttachments="false" sendsAttachments="false" anonymous="optional"><con:settings/><con:call id="6b2517d2-942c-4c5a-b5cf-10358d82a2ef" name="Request 1"><con:settings/><con:encoding>UTF-8</con:encoding><con:endpoint>https://demo.borland.com/OrderWebServiceEx/OrderService.asmx</con:endpoint><con:request><![CDATA[<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope" xmlns:tem="http://tempuri.org/">\r
+   <soap:Header/>\r
+   <soap:Body>\r
+      <tem:Login>\r
+         <!--Optional:-->\r
+         <tem:Username>?</tem:Username>\r
+         <!--Optional:-->\r
+         <tem:Password>?</tem:Password>\r
+      </tem:Login>\r
+   </soap:Body>\r
+</soap:Envelope>]]></con:request><con:wsaConfig mustUnderstand="NONE" version="200508" action="http://tempuri.org/OrderServiceSoap/LoginRequest"/></con:call></con:operation><con:operation id="ce12583e-04e9-4961-97f3-bc911af54ca2" isOneWay="false" action="http://tempuri.org/Logout" name="Logout" bindingOperationName="Logout" type="Request-Response" inputName="" receivesAttachments="false" sendsAttachments="false" anonymous="optional"><con:settings/><con:call id="d15f6876-6f44-4e71-9136-9e53ea889d44" name="Request 1"><con:settings/><con:encoding>UTF-8</con:encoding><con:endpoint>https://demo.borland.com/OrderWebServiceEx/OrderService.asmx</con:endpoint><con:request><![CDATA[<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope" xmlns:tem="http://tempuri.org/">\r
+   <soap:Header/>\r
+   <soap:Body>\r
+      <tem:Logout/>\r
+   </soap:Body>\r
+</soap:Envelope>]]></con:request><con:wsaConfig mustUnderstand="NONE" version="200508" action="http://tempuri.org/OrderServiceSoap/LogoutRequest"/></con:call></con:operation><con:operation id="1eba2048-6d06-4834-8510-50272d9795c0" isOneWay="false" action="http://tempuri.org/RemoveOrderItem" name="RemoveOrderItem" bindingOperationName="RemoveOrderItem" type="Request-Response" inputName="" receivesAttachments="false" sendsAttachments="false" anonymous="optional"><con:settings/><con:call id="febfe4f8-1e64-4ff5-9bce-a6ab54f6d053" name="Request 1"><con:settings/><con:encoding>UTF-8</con:encoding><con:endpoint>https://demo.borland.com/OrderWebServiceEx/OrderService.asmx</con:endpoint><con:request><![CDATA[<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope" xmlns:tem="http://tempuri.org/">\r
+   <soap:Header/>\r
+   <soap:Body>\r
+      <tem:RemoveOrderItem>\r
+         <tem:UserId>?</tem:UserId>\r
+         <tem:OrderId>?</tem:OrderId>\r
+         <tem:ItemPosition>?</tem:ItemPosition>\r
+      </tem:RemoveOrderItem>\r
+   </soap:Body>\r
+</soap:Envelope>]]></con:request><con:wsaConfig mustUnderstand="NONE" version="200508" action="http://tempuri.org/OrderServiceSoap/RemoveOrderItemRequest"/></con:call></con:operation><con:operation id="acf8d0b3-3a6f-4a41-806c-db9e8a0125c5" isOneWay="false" action="http://tempuri.org/SearchArticles" name="SearchArticles" bindingOperationName="SearchArticles" type="Request-Response" inputName="" receivesAttachments="false" sendsAttachments="false" anonymous="optional"><con:settings/><con:call id="45668775-dd25-4d88-9426-31942540341c" name="Request to OrderServiceSoap12 MockService"><con:settings><con:setting id="com.eviware.soapui.impl.wsdl.WsdlRequest@request-headers">&lt;xml-fragment/></con:setting></con:settings><con:encoding>UTF-8</con:encoding><con:endpoint>http://localhost:8088/mockOrderServiceSoap12/OrderWebServiceEx/OrderService.asmx</con:endpoint><con:request><![CDATA[<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope" xmlns:tem="http://tempuri.org/">\r
+   <soap:Header/>\r
+   <soap:Body>\r
+      <tem:SearchArticles>\r
+         <!--Optional:-->\r
+         <tem:ArticleNamePattern>ALL</tem:ArticleNamePattern>\r
+      </tem:SearchArticles>\r
+   </soap:Body>\r
+</soap:Envelope>]]></con:request><con:credentials><con:authType>No Authorization</con:authType></con:credentials><con:jmsConfig JMSDeliveryMode="PERSISTENT"/><con:jmsPropertyConfig/><con:wsaConfig mustUnderstand="NONE" version="200508" action="http://tempuri.org/OrderServiceSoap/SearchArticlesRequest"/><con:wsrmConfig version="1.2"/></con:call></con:operation></con:interface><con:interface xsi:type="con:WsdlInterface" id="fddd6d30-497c-4701-8500-3fc26f609645" wsaVersion="NONE" name="OrderServiceSoap" type="wsdl" bindingName="{http://tempuri.org/}OrderServiceSoap" soapVersion="1_1" anonymous="optional" definition="file:/C:/Users/MaiteDiaz/AnypointStudio/mule-skills-demo/apps/sapi-price-providers-tih/src/main/resources/wsdl/borland-orderservice.wsdl" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><con:settings/><con:definitionCache type="TEXT" rootPart="file:/C:/Users/MaiteDiaz/AnypointStudio/mule-skills-demo/apps/sapi-price-providers-tih/src/main/resources/wsdl/borland-orderservice.wsdl"><con:part><con:url>file:/C:/Users/MaiteDiaz/AnypointStudio/mule-skills-demo/apps/sapi-price-providers-tih/src/main/resources/wsdl/borland-orderservice.wsdl</con:url><con:content><![CDATA[<wsdl:definitions targetNamespace="http://tempuri.org/" xmlns:s="http://www.w3.org/2001/XMLSchema" xmlns:soap12="http://schemas.xmlsoap.org/wsdl/soap12/" xmlns:mime="http://schemas.xmlsoap.org/wsdl/mime/" xmlns:tns="http://tempuri.org/" xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/" xmlns:tm="http://microsoft.com/wsdl/mime/textMatching/" xmlns:http="http://schemas.xmlsoap.org/wsdl/http/" xmlns:soapenc="http://schemas.xmlsoap.org/soap/encoding/" xmlns:wsdl="http://schemas.xmlsoap.org/wsdl/">
+  <wsdl:types>
+    <s:schema elementFormDefault="qualified" targetNamespace="http://tempuri.org/">
+      <s:element name="GetArticleById">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="ArticleId" type="s:int"/>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetArticleByIdResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetArticleByIdResult" type="tns:Article"/>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:complexType name="Article">
+        <s:sequence>
+          <s:element minOccurs="1" maxOccurs="1" name="ArticleId" type="s:int"/>
+          <s:element minOccurs="0" maxOccurs="1" name="Name" type="s:string"/>
+          <s:element minOccurs="1" maxOccurs="1" name="Price" type="s:double"/>
+        </s:sequence>
+      </s:complexType>
+      <s:element name="GetArticleByName">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="ArticleName" type="s:string"/>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetArticleByNameResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetArticleByNameResult" type="tns:Article"/>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="SearchArticles">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="ArticleNamePattern" type="s:string"/>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="SearchArticlesResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="SearchArticlesResult" type="tns:ArrayOfArticle"/>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:complexType name="ArrayOfArticle">
+        <s:sequence>
+          <s:element minOccurs="0" maxOccurs="unbounded" name="Article" nillable="true" type="tns:Article"/>
+        </s:sequence>
+      </s:complexType>
+      <s:element name="CreateUser">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="Username" type="s:string"/>
+            <s:element minOccurs="0" maxOccurs="1" name="Password" type="s:string"/>
+            <s:element minOccurs="0" maxOccurs="1" name="FirstName" type="s:string"/>
+            <s:element minOccurs="0" maxOccurs="1" name="LastName" type="s:string"/>
+            <s:element minOccurs="0" maxOccurs="1" name="Street" type="s:string"/>
+            <s:element minOccurs="0" maxOccurs="1" name="City" type="s:string"/>
+            <s:element minOccurs="0" maxOccurs="1" name="ZIP" type="s:string"/>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="CreateUserResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="CreateUserResult" type="s:boolean"/>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="DeleteUser">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="Username" type="s:string"/>
+            <s:element minOccurs="0" maxOccurs="1" name="Password" type="s:string"/>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="DeleteUserResponse">
+        <s:complexType/>
+      </s:element>
+      <s:element name="Login">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="Username" type="s:string"/>
+            <s:element minOccurs="0" maxOccurs="1" name="Password" type="s:string"/>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="LoginResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="LoginResult" type="s:int"/>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="Logout">
+        <s:complexType/>
+      </s:element>
+      <s:element name="LogoutResponse">
+        <s:complexType/>
+      </s:element>
+      <s:element name="GetOrders">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="UserId" type="s:int"/>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetOrdersResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetOrdersResult" type="tns:ArrayOfInt"/>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:complexType name="ArrayOfInt">
+        <s:sequence>
+          <s:element minOccurs="0" maxOccurs="unbounded" name="int" type="s:int"/>
+        </s:sequence>
+      </s:complexType>
+      <s:element name="GetOrderById">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="UserId" type="s:int"/>
+            <s:element minOccurs="1" maxOccurs="1" name="OrderId" type="s:int"/>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetOrderByIdResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetOrderByIdResult" type="tns:Order"/>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:complexType name="Order">
+        <s:sequence>
+          <s:element minOccurs="1" maxOccurs="1" name="UserId" type="s:int"/>
+          <s:element minOccurs="1" maxOccurs="1" name="OrderId" type="s:int"/>
+          <s:element minOccurs="0" maxOccurs="unbounded" name="OrderItems"/>
+          <s:element minOccurs="1" maxOccurs="1" name="Status" type="tns:OrderStatus"/>
+        </s:sequence>
+      </s:complexType>
+      <s:simpleType name="OrderStatus">
+        <s:restriction base="s:string">
+          <s:enumeration value="InProgress"/>
+          <s:enumeration value="Ordered"/>
+          <s:enumeration value="Delivered"/>
+          <s:enumeration value="Canceled"/>
+        </s:restriction>
+      </s:simpleType>
+      <s:element name="CreateNewOrder">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="UserId" type="s:int"/>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="CreateNewOrderResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="CreateNewOrderResult" type="tns:Order"/>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="DeleteOrder">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="UserId" type="s:int"/>
+            <s:element minOccurs="1" maxOccurs="1" name="OrderId" type="s:int"/>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="DeleteOrderResponse">
+        <s:complexType/>
+      </s:element>
+      <s:element name="AddOrderItem">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="UserId" type="s:int"/>
+            <s:element minOccurs="1" maxOccurs="1" name="OrderId" type="s:int"/>
+            <s:element minOccurs="1" maxOccurs="1" name="ArticleId" type="s:int"/>
+            <s:element minOccurs="1" maxOccurs="1" name="Amount" type="s:int"/>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="AddOrderItemResponse">
+        <s:complexType/>
+      </s:element>
+      <s:element name="GetOrderPrice">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="UserId" type="s:int"/>
+            <s:element minOccurs="1" maxOccurs="1" name="OrderId" type="s:int"/>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetOrderPriceResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="GetOrderPriceResult" type="s:double"/>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetOrderItem">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="UserId" type="s:int"/>
+            <s:element minOccurs="1" maxOccurs="1" name="OrderId" type="s:int"/>
+            <s:element minOccurs="1" maxOccurs="1" name="ItemPosition" type="s:int"/>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:complexType name="OrderItem">
+        <s:sequence>
+          <s:element minOccurs="1" maxOccurs="1" name="ArticleId" type="s:int"/>
+          <s:element minOccurs="1" maxOccurs="1" name="Amount" type="s:int"/>
+          <s:element minOccurs="1" maxOccurs="1" name="SinglePrice" type="s:double"/>
+          <s:element minOccurs="1" maxOccurs="1" name="Price" type="s:double"/>
+        </s:sequence>
+      </s:complexType>
+      <s:element name="GetOrderItemResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="0" maxOccurs="1" name="GetOrderItemResult" type="tns:OrderItem"/>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="RemoveOrderItem">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="UserId" type="s:int"/>
+            <s:element minOccurs="1" maxOccurs="1" name="OrderId" type="s:int"/>
+            <s:element minOccurs="1" maxOccurs="1" name="ItemPosition" type="s:int"/>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="RemoveOrderItemResponse">
+        <s:complexType/>
+      </s:element>
+      <s:element name="GetOrderItemCount">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="UserId" type="s:int"/>
+            <s:element minOccurs="1" maxOccurs="1" name="OrderId" type="s:int"/>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="GetOrderItemCountResponse">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="GetOrderItemCountResult" type="s:int"/>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="ChangeOrderStatus">
+        <s:complexType>
+          <s:sequence>
+            <s:element minOccurs="1" maxOccurs="1" name="UserId" type="s:int"/>
+            <s:element minOccurs="1" maxOccurs="1" name="OrderId" type="s:int"/>
+            <s:element minOccurs="1" maxOccurs="1" name="NewStatus" type="tns:OrderStatus"/>
+          </s:sequence>
+        </s:complexType>
+      </s:element>
+      <s:element name="ChangeOrderStatusResponse">
+        <s:complexType/>
+      </s:element>
+    </s:schema>
+  </wsdl:types>
+  <wsdl:message name="GetArticleByIdSoapIn">
+    <wsdl:part name="parameters" element="tns:GetArticleById"/>
+  </wsdl:message>
+  <wsdl:message name="GetArticleByIdSoapOut">
+    <wsdl:part name="parameters" element="tns:GetArticleByIdResponse"/>
+  </wsdl:message>
+  <wsdl:message name="GetArticleByNameSoapIn">
+    <wsdl:part name="parameters" element="tns:GetArticleByName"/>
+  </wsdl:message>
+  <wsdl:message name="GetArticleByNameSoapOut">
+    <wsdl:part name="parameters" element="tns:GetArticleByNameResponse"/>
+  </wsdl:message>
+  <wsdl:message name="SearchArticlesSoapIn">
+    <wsdl:part name="parameters" element="tns:SearchArticles"/>
+  </wsdl:message>
+  <wsdl:message name="SearchArticlesSoapOut">
+    <wsdl:part name="parameters" element="tns:SearchArticlesResponse"/>
+  </wsdl:message>
+  <wsdl:message name="CreateUserSoapIn">
+    <wsdl:part name="parameters" element="tns:CreateUser"/>
+  </wsdl:message>
+  <wsdl:message name="CreateUserSoapOut">
+    <wsdl:part name="parameters" element="tns:CreateUserResponse"/>
+  </wsdl:message>
+  <wsdl:message name="DeleteUserSoapIn">
+    <wsdl:part name="parameters" element="tns:DeleteUser"/>
+  </wsdl:message>
+  <wsdl:message name="DeleteUserSoapOut">
+    <wsdl:part name="parameters" element="tns:DeleteUserResponse"/>
+  </wsdl:message>
+  <wsdl:message name="LoginSoapIn">
+    <wsdl:part name="parameters" element="tns:Login"/>
+  </wsdl:message>
+  <wsdl:message name="LoginSoapOut">
+    <wsdl:part name="parameters" element="tns:LoginResponse"/>
+  </wsdl:message>
+  <wsdl:message name="LogoutSoapIn">
+    <wsdl:part name="parameters" element="tns:Logout"/>
+  </wsdl:message>
+  <wsdl:message name="LogoutSoapOut">
+    <wsdl:part name="parameters" element="tns:LogoutResponse"/>
+  </wsdl:message>
+  <wsdl:message name="GetOrdersSoapIn">
+    <wsdl:part name="parameters" element="tns:GetOrders"/>
+  </wsdl:message>
+  <wsdl:message name="GetOrdersSoapOut">
+    <wsdl:part name="parameters" element="tns:GetOrdersResponse"/>
+  </wsdl:message>
+  <wsdl:message name="GetOrderByIdSoapIn">
+    <wsdl:part name="parameters" element="tns:GetOrderById"/>
+  </wsdl:message>
+  <wsdl:message name="GetOrderByIdSoapOut">
+    <wsdl:part name="parameters" element="tns:GetOrderByIdResponse"/>
+  </wsdl:message>
+  <wsdl:message name="CreateNewOrderSoapIn">
+    <wsdl:part name="parameters" element="tns:CreateNewOrder"/>
+  </wsdl:message>
+  <wsdl:message name="CreateNewOrderSoapOut">
+    <wsdl:part name="parameters" element="tns:CreateNewOrderResponse"/>
+  </wsdl:message>
+  <wsdl:message name="DeleteOrderSoapIn">
+    <wsdl:part name="parameters" element="tns:DeleteOrder"/>
+  </wsdl:message>
+  <wsdl:message name="DeleteOrderSoapOut">
+    <wsdl:part name="parameters" element="tns:DeleteOrderResponse"/>
+  </wsdl:message>
+  <wsdl:message name="AddOrderItemSoapIn">
+    <wsdl:part name="parameters" element="tns:AddOrderItem"/>
+  </wsdl:message>
+  <wsdl:message name="AddOrderItemSoapOut">
+    <wsdl:part name="parameters" element="tns:AddOrderItemResponse"/>
+  </wsdl:message>
+  <wsdl:message name="GetOrderPriceSoapIn">
+    <wsdl:part name="parameters" element="tns:GetOrderPrice"/>
+  </wsdl:message>
+  <wsdl:message name="GetOrderPriceSoapOut">
+    <wsdl:part name="parameters" element="tns:GetOrderPriceResponse"/>
+  </wsdl:message>
+  <wsdl:message name="GetOrderItemSoapIn">
+    <wsdl:part name="parameters" element="tns:GetOrderItem"/>
+  </wsdl:message>
+  <wsdl:message name="GetOrderItemSoapOut">
+    <wsdl:part name="parameters" element="tns:GetOrderItemResponse"/>
+  </wsdl:message>
+  <wsdl:message name="RemoveOrderItemSoapIn">
+    <wsdl:part name="parameters" element="tns:RemoveOrderItem"/>
+  </wsdl:message>
+  <wsdl:message name="RemoveOrderItemSoapOut">
+    <wsdl:part name="parameters" element="tns:RemoveOrderItemResponse"/>
+  </wsdl:message>
+  <wsdl:message name="GetOrderItemCountSoapIn">
+    <wsdl:part name="parameters" element="tns:GetOrderItemCount"/>
+  </wsdl:message>
+  <wsdl:message name="GetOrderItemCountSoapOut">
+    <wsdl:part name="parameters" element="tns:GetOrderItemCountResponse"/>
+  </wsdl:message>
+  <wsdl:message name="ChangeOrderStatusSoapIn">
+    <wsdl:part name="parameters" element="tns:ChangeOrderStatus"/>
+  </wsdl:message>
+  <wsdl:message name="ChangeOrderStatusSoapOut">
+    <wsdl:part name="parameters" element="tns:ChangeOrderStatusResponse"/>
+  </wsdl:message>
+  <wsdl:portType name="OrderServiceSoap">
+    <wsdl:operation name="GetArticleById">
+      <wsdl:input message="tns:GetArticleByIdSoapIn"/>
+      <wsdl:output message="tns:GetArticleByIdSoapOut"/>
+    </wsdl:operation>
+    <wsdl:operation name="GetArticleByName">
+      <wsdl:input message="tns:GetArticleByNameSoapIn"/>
+      <wsdl:output message="tns:GetArticleByNameSoapOut"/>
+    </wsdl:operation>
+    <wsdl:operation name="SearchArticles">
+      <wsdl:input message="tns:SearchArticlesSoapIn"/>
+      <wsdl:output message="tns:SearchArticlesSoapOut"/>
+    </wsdl:operation>
+    <wsdl:operation name="CreateUser">
+      <wsdl:input message="tns:CreateUserSoapIn"/>
+      <wsdl:output message="tns:CreateUserSoapOut"/>
+    </wsdl:operation>
+    <wsdl:operation name="DeleteUser">
+      <wsdl:input message="tns:DeleteUserSoapIn"/>
+      <wsdl:output message="tns:DeleteUserSoapOut"/>
+    </wsdl:operation>
+    <wsdl:operation name="Login">
+      <wsdl:input message="tns:LoginSoapIn"/>
+      <wsdl:output message="tns:LoginSoapOut"/>
+    </wsdl:operation>
+    <wsdl:operation name="Logout">
+      <wsdl:input message="tns:LogoutSoapIn"/>
+      <wsdl:output message="tns:LogoutSoapOut"/>
+    </wsdl:operation>
+    <wsdl:operation name="GetOrders">
+      <wsdl:input message="tns:GetOrdersSoapIn"/>
+      <wsdl:output message="tns:GetOrdersSoapOut"/>
+    </wsdl:operation>
+    <wsdl:operation name="GetOrderById">
+      <wsdl:input message="tns:GetOrderByIdSoapIn"/>
+      <wsdl:output message="tns:GetOrderByIdSoapOut"/>
+    </wsdl:operation>
+    <wsdl:operation name="CreateNewOrder">
+      <wsdl:input message="tns:CreateNewOrderSoapIn"/>
+      <wsdl:output message="tns:CreateNewOrderSoapOut"/>
+    </wsdl:operation>
+    <wsdl:operation name="DeleteOrder">
+      <wsdl:input message="tns:DeleteOrderSoapIn"/>
+      <wsdl:output message="tns:DeleteOrderSoapOut"/>
+    </wsdl:operation>
+    <wsdl:operation name="AddOrderItem">
+      <wsdl:input message="tns:AddOrderItemSoapIn"/>
+      <wsdl:output message="tns:AddOrderItemSoapOut"/>
+    </wsdl:operation>
+    <wsdl:operation name="GetOrderPrice">
+      <wsdl:input message="tns:GetOrderPriceSoapIn"/>
+      <wsdl:output message="tns:GetOrderPriceSoapOut"/>
+    </wsdl:operation>
+    <wsdl:operation name="GetOrderItem">
+      <wsdl:input message="tns:GetOrderItemSoapIn"/>
+      <wsdl:output message="tns:GetOrderItemSoapOut"/>
+    </wsdl:operation>
+    <wsdl:operation name="RemoveOrderItem">
+      <wsdl:input message="tns:RemoveOrderItemSoapIn"/>
+      <wsdl:output message="tns:RemoveOrderItemSoapOut"/>
+    </wsdl:operation>
+    <wsdl:operation name="GetOrderItemCount">
+      <wsdl:input message="tns:GetOrderItemCountSoapIn"/>
+      <wsdl:output message="tns:GetOrderItemCountSoapOut"/>
+    </wsdl:operation>
+    <wsdl:operation name="ChangeOrderStatus">
+      <wsdl:input message="tns:ChangeOrderStatusSoapIn"/>
+      <wsdl:output message="tns:ChangeOrderStatusSoapOut"/>
+    </wsdl:operation>
+  </wsdl:portType>
+  <wsdl:binding name="OrderServiceSoap" type="tns:OrderServiceSoap">
+    <soap:binding transport="http://schemas.xmlsoap.org/soap/http"/>
+    <wsdl:operation name="GetArticleById">
+      <soap:operation soapAction="http://tempuri.org/GetArticleById" style="document"/>
+      <wsdl:input>
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetArticleByName">
+      <soap:operation soapAction="http://tempuri.org/GetArticleByName" style="document"/>
+      <wsdl:input>
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="SearchArticles">
+      <soap:operation soapAction="http://tempuri.org/SearchArticles" style="document"/>
+      <wsdl:input>
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="CreateUser">
+      <soap:operation soapAction="http://tempuri.org/CreateUser" style="document"/>
+      <wsdl:input>
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="DeleteUser">
+      <soap:operation soapAction="http://tempuri.org/DeleteUser" style="document"/>
+      <wsdl:input>
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="Login">
+      <soap:operation soapAction="http://tempuri.org/Login" style="document"/>
+      <wsdl:input>
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="Logout">
+      <soap:operation soapAction="http://tempuri.org/Logout" style="document"/>
+      <wsdl:input>
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetOrders">
+      <soap:operation soapAction="http://tempuri.org/GetOrders" style="document"/>
+      <wsdl:input>
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetOrderById">
+      <soap:operation soapAction="http://tempuri.org/GetOrderById" style="document"/>
+      <wsdl:input>
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="CreateNewOrder">
+      <soap:operation soapAction="http://tempuri.org/CreateNewOrder" style="document"/>
+      <wsdl:input>
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="DeleteOrder">
+      <soap:operation soapAction="http://tempuri.org/DeleteOrder" style="document"/>
+      <wsdl:input>
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="AddOrderItem">
+      <soap:operation soapAction="http://tempuri.org/AddOrderItem" style="document"/>
+      <wsdl:input>
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetOrderPrice">
+      <soap:operation soapAction="http://tempuri.org/GetOrderPrice" style="document"/>
+      <wsdl:input>
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetOrderItem">
+      <soap:operation soapAction="http://tempuri.org/GetOrderItem" style="document"/>
+      <wsdl:input>
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="RemoveOrderItem">
+      <soap:operation soapAction="http://tempuri.org/RemoveOrderItem" style="document"/>
+      <wsdl:input>
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetOrderItemCount">
+      <soap:operation soapAction="http://tempuri.org/GetOrderItemCount" style="document"/>
+      <wsdl:input>
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="ChangeOrderStatus">
+      <soap:operation soapAction="http://tempuri.org/ChangeOrderStatus" style="document"/>
+      <wsdl:input>
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+  </wsdl:binding>
+  <wsdl:binding name="OrderServiceSoap12" type="tns:OrderServiceSoap">
+    <soap12:binding transport="http://schemas.xmlsoap.org/soap/http"/>
+    <wsdl:operation name="GetArticleById">
+      <soap12:operation soapAction="http://tempuri.org/GetArticleById" style="document"/>
+      <wsdl:input>
+        <soap12:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetArticleByName">
+      <soap12:operation soapAction="http://tempuri.org/GetArticleByName" style="document"/>
+      <wsdl:input>
+        <soap12:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="SearchArticles">
+      <soap12:operation soapAction="http://tempuri.org/SearchArticles" style="document"/>
+      <wsdl:input>
+        <soap12:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="CreateUser">
+      <soap12:operation soapAction="http://tempuri.org/CreateUser" style="document"/>
+      <wsdl:input>
+        <soap12:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="DeleteUser">
+      <soap12:operation soapAction="http://tempuri.org/DeleteUser" style="document"/>
+      <wsdl:input>
+        <soap12:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="Login">
+      <soap12:operation soapAction="http://tempuri.org/Login" style="document"/>
+      <wsdl:input>
+        <soap12:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="Logout">
+      <soap12:operation soapAction="http://tempuri.org/Logout" style="document"/>
+      <wsdl:input>
+        <soap12:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetOrders">
+      <soap12:operation soapAction="http://tempuri.org/GetOrders" style="document"/>
+      <wsdl:input>
+        <soap12:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetOrderById">
+      <soap12:operation soapAction="http://tempuri.org/GetOrderById" style="document"/>
+      <wsdl:input>
+        <soap12:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="CreateNewOrder">
+      <soap12:operation soapAction="http://tempuri.org/CreateNewOrder" style="document"/>
+      <wsdl:input>
+        <soap12:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="DeleteOrder">
+      <soap12:operation soapAction="http://tempuri.org/DeleteOrder" style="document"/>
+      <wsdl:input>
+        <soap12:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="AddOrderItem">
+      <soap12:operation soapAction="http://tempuri.org/AddOrderItem" style="document"/>
+      <wsdl:input>
+        <soap12:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetOrderPrice">
+      <soap12:operation soapAction="http://tempuri.org/GetOrderPrice" style="document"/>
+      <wsdl:input>
+        <soap12:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetOrderItem">
+      <soap12:operation soapAction="http://tempuri.org/GetOrderItem" style="document"/>
+      <wsdl:input>
+        <soap12:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="RemoveOrderItem">
+      <soap12:operation soapAction="http://tempuri.org/RemoveOrderItem" style="document"/>
+      <wsdl:input>
+        <soap12:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="GetOrderItemCount">
+      <soap12:operation soapAction="http://tempuri.org/GetOrderItemCount" style="document"/>
+      <wsdl:input>
+        <soap12:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+    <wsdl:operation name="ChangeOrderStatus">
+      <soap12:operation soapAction="http://tempuri.org/ChangeOrderStatus" style="document"/>
+      <wsdl:input>
+        <soap12:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output>
+        <soap12:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+  </wsdl:binding>
+  <wsdl:service name="OrderService">
+    <wsdl:port name="OrderServiceSoap" binding="tns:OrderServiceSoap">
+      <soap:address location="https://demo.borland.com/OrderWebServiceEx/OrderService.asmx"/>
+    </wsdl:port>
+    <wsdl:port name="OrderServiceSoap12" binding="tns:OrderServiceSoap12">
+      <soap12:address location="https://demo.borland.com/OrderWebServiceEx/OrderService.asmx"/>
+    </wsdl:port>
+  </wsdl:service>
+</wsdl:definitions>]]></con:content><con:type>http://schemas.xmlsoap.org/wsdl/</con:type></con:part></con:definitionCache><con:endpoints><con:endpoint>http://jhernandez8fs3:8088/mockOrderServiceSoap</con:endpoint><con:endpoint>https://demo.borland.com/OrderWebServiceEx/OrderService.asmx</con:endpoint></con:endpoints><con:operation id="1325a180-a75b-4fa2-ad05-ce2d452b4acf" isOneWay="false" action="http://tempuri.org/AddOrderItem" name="AddOrderItem" bindingOperationName="AddOrderItem" type="Request-Response" inputName="" receivesAttachments="false" sendsAttachments="false" anonymous="optional"><con:settings/><con:call id="0c9ee069-cd3b-4764-8889-70971df08a25" name="Request 1"><con:settings/><con:encoding>UTF-8</con:encoding><con:endpoint>https://demo.borland.com/OrderWebServiceEx/OrderService.asmx</con:endpoint><con:request><![CDATA[<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:tem="http://tempuri.org/">\r
+   <soapenv:Header/>\r
+   <soapenv:Body>\r
+      <tem:AddOrderItem>\r
+         <tem:UserId>?</tem:UserId>\r
+         <tem:OrderId>?</tem:OrderId>\r
+         <tem:ArticleId>?</tem:ArticleId>\r
+         <tem:Amount>?</tem:Amount>\r
+      </tem:AddOrderItem>\r
+   </soapenv:Body>\r
+</soapenv:Envelope>]]></con:request><con:wsaConfig mustUnderstand="NONE" version="200508" action="http://tempuri.org/AddOrderItem"/></con:call></con:operation><con:operation id="93bd33a9-33db-46a5-813e-6e30054fe5b1" isOneWay="false" action="http://tempuri.org/ChangeOrderStatus" name="ChangeOrderStatus" bindingOperationName="ChangeOrderStatus" type="Request-Response" inputName="" receivesAttachments="false" sendsAttachments="false" anonymous="optional"><con:settings/><con:call id="ffb67453-d50e-4239-bf74-a8992f991d0c" name="Request 1"><con:settings/><con:encoding>UTF-8</con:encoding><con:endpoint>https://demo.borland.com/OrderWebServiceEx/OrderService.asmx</con:endpoint><con:request><![CDATA[<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:tem="http://tempuri.org/">\r
+   <soapenv:Header/>\r
+   <soapenv:Body>\r
+      <tem:ChangeOrderStatus>\r
+         <tem:UserId>?</tem:UserId>\r
+         <tem:OrderId>?</tem:OrderId>\r
+         <tem:NewStatus>?</tem:NewStatus>\r
+      </tem:ChangeOrderStatus>\r
+   </soapenv:Body>\r
+</soapenv:Envelope>]]></con:request><con:wsaConfig mustUnderstand="NONE" version="200508" action="http://tempuri.org/ChangeOrderStatus"/></con:call></con:operation><con:operation id="29364214-9973-4904-b727-8e666dde3762" isOneWay="false" action="http://tempuri.org/CreateNewOrder" name="CreateNewOrder" bindingOperationName="CreateNewOrder" type="Request-Response" inputName="" receivesAttachments="false" sendsAttachments="false" anonymous="optional"><con:settings/><con:call id="57855ecb-dd46-40d0-8735-7b6a9299672a" name="Request 1"><con:settings/><con:encoding>UTF-8</con:encoding><con:endpoint>https://demo.borland.com/OrderWebServiceEx/OrderService.asmx</con:endpoint><con:request><![CDATA[<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:tem="http://tempuri.org/">\r
+   <soapenv:Header/>\r
+   <soapenv:Body>\r
+      <tem:CreateNewOrder>\r
+         <tem:UserId>?</tem:UserId>\r
+      </tem:CreateNewOrder>\r
+   </soapenv:Body>\r
+</soapenv:Envelope>]]></con:request><con:wsaConfig mustUnderstand="NONE" version="200508" action="http://tempuri.org/CreateNewOrder"/></con:call></con:operation><con:operation id="eb574c2e-7348-4fdb-b512-906fbbdce98e" isOneWay="false" action="http://tempuri.org/CreateUser" name="CreateUser" bindingOperationName="CreateUser" type="Request-Response" inputName="" receivesAttachments="false" sendsAttachments="false" anonymous="optional"><con:settings/><con:call id="df780211-9030-4247-ae50-c217a7addcc9" name="Request 1"><con:settings/><con:encoding>UTF-8</con:encoding><con:endpoint>https://demo.borland.com/OrderWebServiceEx/OrderService.asmx</con:endpoint><con:request><![CDATA[<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:tem="http://tempuri.org/">\r
+   <soapenv:Header/>\r
+   <soapenv:Body>\r
+      <tem:CreateUser>\r
+         <!--Optional:-->\r
+         <tem:Username>?</tem:Username>\r
+         <!--Optional:-->\r
+         <tem:Password>?</tem:Password>\r
+         <!--Optional:-->\r
+         <tem:FirstName>?</tem:FirstName>\r
+         <!--Optional:-->\r
+         <tem:LastName>?</tem:LastName>\r
+         <!--Optional:-->\r
+         <tem:Street>?</tem:Street>\r
+         <!--Optional:-->\r
+         <tem:City>?</tem:City>\r
+         <!--Optional:-->\r
+         <tem:ZIP>?</tem:ZIP>\r
+      </tem:CreateUser>\r
+   </soapenv:Body>\r
+</soapenv:Envelope>]]></con:request><con:wsaConfig mustUnderstand="NONE" version="200508" action="http://tempuri.org/CreateUser"/></con:call></con:operation><con:operation id="753e3244-a583-44c4-a034-9ce744a24399" isOneWay="false" action="http://tempuri.org/DeleteOrder" name="DeleteOrder" bindingOperationName="DeleteOrder" type="Request-Response" inputName="" receivesAttachments="false" sendsAttachments="false" anonymous="optional"><con:settings/><con:call id="f4a98a29-0595-4391-9901-4c5de4686c23" name="Request 1"><con:settings/><con:encoding>UTF-8</con:encoding><con:endpoint>https://demo.borland.com/OrderWebServiceEx/OrderService.asmx</con:endpoint><con:request><![CDATA[<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:tem="http://tempuri.org/">\r
+   <soapenv:Header/>\r
+   <soapenv:Body>\r
+      <tem:DeleteOrder>\r
+         <tem:UserId>?</tem:UserId>\r
+         <tem:OrderId>?</tem:OrderId>\r
+      </tem:DeleteOrder>\r
+   </soapenv:Body>\r
+</soapenv:Envelope>]]></con:request><con:wsaConfig mustUnderstand="NONE" version="200508" action="http://tempuri.org/DeleteOrder"/></con:call></con:operation><con:operation id="71bbc5be-2f2a-44c6-aaf7-5975530c868c" isOneWay="false" action="http://tempuri.org/DeleteUser" name="DeleteUser" bindingOperationName="DeleteUser" type="Request-Response" inputName="" receivesAttachments="false" sendsAttachments="false" anonymous="optional"><con:settings/><con:call id="1d9ff185-9b24-4f8a-a2cd-2f0fec2da229" name="Request 1"><con:settings/><con:encoding>UTF-8</con:encoding><con:endpoint>https://demo.borland.com/OrderWebServiceEx/OrderService.asmx</con:endpoint><con:request><![CDATA[<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:tem="http://tempuri.org/">\r
+   <soapenv:Header/>\r
+   <soapenv:Body>\r
+      <tem:DeleteUser>\r
+         <!--Optional:-->\r
+         <tem:Username>?</tem:Username>\r
+         <!--Optional:-->\r
+         <tem:Password>?</tem:Password>\r
+      </tem:DeleteUser>\r
+   </soapenv:Body>\r
+</soapenv:Envelope>]]></con:request><con:wsaConfig mustUnderstand="NONE" version="200508" action="http://tempuri.org/DeleteUser"/></con:call></con:operation><con:operation id="b2f97fc5-fc91-483e-92c4-f09e89afdb28" isOneWay="false" action="http://tempuri.org/GetArticleById" name="GetArticleById" bindingOperationName="GetArticleById" type="Request-Response" inputName="" receivesAttachments="false" sendsAttachments="false" anonymous="optional"><con:settings/><con:call id="af212c5d-22fd-476b-bea7-63eee80189e9" name="Request 1"><con:settings/><con:encoding>UTF-8</con:encoding><con:endpoint>https://demo.borland.com/OrderWebServiceEx/OrderService.asmx</con:endpoint><con:request><![CDATA[<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:tem="http://tempuri.org/">\r
+   <soapenv:Header/>\r
+   <soapenv:Body>\r
+      <tem:GetArticleById>\r
+         <tem:ArticleId>?</tem:ArticleId>\r
+      </tem:GetArticleById>\r
+   </soapenv:Body>\r
+</soapenv:Envelope>]]></con:request><con:wsaConfig mustUnderstand="NONE" version="200508" action="http://tempuri.org/GetArticleById"/></con:call></con:operation><con:operation id="43e6e00f-8509-41bd-9af3-56ca8c3b864e" isOneWay="false" action="http://tempuri.org/GetArticleByName" name="GetArticleByName" bindingOperationName="GetArticleByName" type="Request-Response" inputName="" receivesAttachments="false" sendsAttachments="false" anonymous="optional"><con:settings/><con:call id="3460a48b-ddeb-4f86-9b01-7612f7f59cd8" name="Request 1"><con:settings/><con:encoding>UTF-8</con:encoding><con:endpoint>https://demo.borland.com/OrderWebServiceEx/OrderService.asmx</con:endpoint><con:request><![CDATA[<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:tem="http://tempuri.org/">\r
+   <soapenv:Header/>\r
+   <soapenv:Body>\r
+      <tem:GetArticleByName>\r
+         <!--Optional:-->\r
+         <tem:ArticleName>?</tem:ArticleName>\r
+      </tem:GetArticleByName>\r
+   </soapenv:Body>\r
+</soapenv:Envelope>]]></con:request><con:wsaConfig mustUnderstand="NONE" version="200508" action="http://tempuri.org/GetArticleByName"/></con:call></con:operation><con:operation id="aaa0b456-91d3-48da-9c07-edba7a17cb76" isOneWay="false" action="http://tempuri.org/GetOrderById" name="GetOrderById" bindingOperationName="GetOrderById" type="Request-Response" inputName="" receivesAttachments="false" sendsAttachments="false" anonymous="optional"><con:settings/><con:call id="872416ca-f298-421d-9bf2-0df56e46839a" name="Request 1"><con:settings/><con:encoding>UTF-8</con:encoding><con:endpoint>https://demo.borland.com/OrderWebServiceEx/OrderService.asmx</con:endpoint><con:request><![CDATA[<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:tem="http://tempuri.org/">\r
+   <soapenv:Header/>\r
+   <soapenv:Body>\r
+      <tem:GetOrderById>\r
+         <tem:UserId>?</tem:UserId>\r
+         <tem:OrderId>?</tem:OrderId>\r
+      </tem:GetOrderById>\r
+   </soapenv:Body>\r
+</soapenv:Envelope>]]></con:request><con:wsaConfig mustUnderstand="NONE" version="200508" action="http://tempuri.org/GetOrderById"/></con:call></con:operation><con:operation id="8ac13be0-ae1f-4854-9082-326acd6c039c" isOneWay="false" action="http://tempuri.org/GetOrderItem" name="GetOrderItem" bindingOperationName="GetOrderItem" type="Request-Response" inputName="" receivesAttachments="false" sendsAttachments="false" anonymous="optional"><con:settings/><con:call id="bee94375-ea55-4d08-98c0-b5c27f33ccf0" name="Request 1"><con:settings/><con:encoding>UTF-8</con:encoding><con:endpoint>https://demo.borland.com/OrderWebServiceEx/OrderService.asmx</con:endpoint><con:request><![CDATA[<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:tem="http://tempuri.org/">\r
+   <soapenv:Header/>\r
+   <soapenv:Body>\r
+      <tem:GetOrderItem>\r
+         <tem:UserId>?</tem:UserId>\r
+         <tem:OrderId>?</tem:OrderId>\r
+         <tem:ItemPosition>?</tem:ItemPosition>\r
+      </tem:GetOrderItem>\r
+   </soapenv:Body>\r
+</soapenv:Envelope>]]></con:request><con:wsaConfig mustUnderstand="NONE" version="200508" action="http://tempuri.org/GetOrderItem"/></con:call></con:operation><con:operation id="56a7a553-4753-43df-9208-c6de8432735e" isOneWay="false" action="http://tempuri.org/GetOrderItemCount" name="GetOrderItemCount" bindingOperationName="GetOrderItemCount" type="Request-Response" inputName="" receivesAttachments="false" sendsAttachments="false" anonymous="optional"><con:settings/><con:call id="b1da0a6f-aa7b-4e65-bddf-42d004a62fbc" name="Request 1"><con:settings/><con:encoding>UTF-8</con:encoding><con:endpoint>https://demo.borland.com/OrderWebServiceEx/OrderService.asmx</con:endpoint><con:request><![CDATA[<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:tem="http://tempuri.org/">\r
+   <soapenv:Header/>\r
+   <soapenv:Body>\r
+      <tem:GetOrderItemCount>\r
+         <tem:UserId>?</tem:UserId>\r
+         <tem:OrderId>?</tem:OrderId>\r
+      </tem:GetOrderItemCount>\r
+   </soapenv:Body>\r
+</soapenv:Envelope>]]></con:request><con:wsaConfig mustUnderstand="NONE" version="200508" action="http://tempuri.org/GetOrderItemCount"/></con:call></con:operation><con:operation id="ea181de0-bbda-4359-84c8-0c109fc37dbb" isOneWay="false" action="http://tempuri.org/GetOrderPrice" name="GetOrderPrice" bindingOperationName="GetOrderPrice" type="Request-Response" inputName="" receivesAttachments="false" sendsAttachments="false" anonymous="optional"><con:settings/><con:call id="409a9965-fe0d-438e-a10f-5eb015f2b30e" name="Request 1"><con:settings/><con:encoding>UTF-8</con:encoding><con:endpoint>https://demo.borland.com/OrderWebServiceEx/OrderService.asmx</con:endpoint><con:request><![CDATA[<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:tem="http://tempuri.org/">\r
+   <soapenv:Header/>\r
+   <soapenv:Body>\r
+      <tem:GetOrderPrice>\r
+         <tem:UserId>?</tem:UserId>\r
+         <tem:OrderId>?</tem:OrderId>\r
+      </tem:GetOrderPrice>\r
+   </soapenv:Body>\r
+</soapenv:Envelope>]]></con:request><con:wsaConfig mustUnderstand="NONE" version="200508" action="http://tempuri.org/GetOrderPrice"/></con:call></con:operation><con:operation id="cb938459-9ca8-4429-b1b7-88bff557f4ea" isOneWay="false" action="http://tempuri.org/GetOrders" name="GetOrders" bindingOperationName="GetOrders" type="Request-Response" inputName="" receivesAttachments="false" sendsAttachments="false" anonymous="optional"><con:settings/><con:call id="1a56b270-766b-4660-b936-0f3f1997585a" name="Request 1"><con:settings/><con:encoding>UTF-8</con:encoding><con:endpoint>https://demo.borland.com/OrderWebServiceEx/OrderService.asmx</con:endpoint><con:request><![CDATA[<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:tem="http://tempuri.org/">\r
+   <soapenv:Header/>\r
+   <soapenv:Body>\r
+      <tem:GetOrders>\r
+         <tem:UserId>?</tem:UserId>\r
+      </tem:GetOrders>\r
+   </soapenv:Body>\r
+</soapenv:Envelope>]]></con:request><con:wsaConfig mustUnderstand="NONE" version="200508" action="http://tempuri.org/GetOrders"/></con:call></con:operation><con:operation id="51bea82f-7a14-4408-ade7-0caa6ea4d1c6" isOneWay="false" action="http://tempuri.org/Login" name="Login" bindingOperationName="Login" type="Request-Response" inputName="" receivesAttachments="false" sendsAttachments="false" anonymous="optional"><con:settings/><con:call id="74df1ef0-fc1d-4b34-ad3b-b3c3ca723f14" name="Request 1"><con:settings/><con:encoding>UTF-8</con:encoding><con:endpoint>https://demo.borland.com/OrderWebServiceEx/OrderService.asmx</con:endpoint><con:request><![CDATA[<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:tem="http://tempuri.org/">\r
+   <soapenv:Header/>\r
+   <soapenv:Body>\r
+      <tem:Login>\r
+         <!--Optional:-->\r
+         <tem:Username>?</tem:Username>\r
+         <!--Optional:-->\r
+         <tem:Password>?</tem:Password>\r
+      </tem:Login>\r
+   </soapenv:Body>\r
+</soapenv:Envelope>]]></con:request><con:wsaConfig mustUnderstand="NONE" version="200508" action="http://tempuri.org/Login"/></con:call></con:operation><con:operation id="e44eef39-e2e4-497e-b370-e5c7a17080cf" isOneWay="false" action="http://tempuri.org/Logout" name="Logout" bindingOperationName="Logout" type="Request-Response" inputName="" receivesAttachments="false" sendsAttachments="false" anonymous="optional"><con:settings/><con:call id="888bf9e0-be21-420a-a877-6fbb9af2fcfc" name="Request 1"><con:settings/><con:encoding>UTF-8</con:encoding><con:endpoint>https://demo.borland.com/OrderWebServiceEx/OrderService.asmx</con:endpoint><con:request><![CDATA[<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:tem="http://tempuri.org/">\r
+   <soapenv:Header/>\r
+   <soapenv:Body>\r
+      <tem:Logout/>\r
+   </soapenv:Body>\r
+</soapenv:Envelope>]]></con:request><con:wsaConfig mustUnderstand="NONE" version="200508" action="http://tempuri.org/Logout"/></con:call></con:operation><con:operation id="a004d4e0-45a1-455d-9c51-84df5d36d102" isOneWay="false" action="http://tempuri.org/RemoveOrderItem" name="RemoveOrderItem" bindingOperationName="RemoveOrderItem" type="Request-Response" inputName="" receivesAttachments="false" sendsAttachments="false" anonymous="optional"><con:settings/><con:call id="62bd2aa6-d64c-49ce-8f28-a52ea13857ab" name="Request 1"><con:settings/><con:encoding>UTF-8</con:encoding><con:endpoint>https://demo.borland.com/OrderWebServiceEx/OrderService.asmx</con:endpoint><con:request><![CDATA[<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:tem="http://tempuri.org/">\r
+   <soapenv:Header/>\r
+   <soapenv:Body>\r
+      <tem:RemoveOrderItem>\r
+         <tem:UserId>?</tem:UserId>\r
+         <tem:OrderId>?</tem:OrderId>\r
+         <tem:ItemPosition>?</tem:ItemPosition>\r
+      </tem:RemoveOrderItem>\r
+   </soapenv:Body>\r
+</soapenv:Envelope>]]></con:request><con:wsaConfig mustUnderstand="NONE" version="200508" action="http://tempuri.org/RemoveOrderItem"/></con:call></con:operation><con:operation id="53eab328-5432-4f58-a384-1fb21f0a50a4" isOneWay="false" action="http://tempuri.org/SearchArticles" name="SearchArticles" bindingOperationName="SearchArticles" type="Request-Response" inputName="" receivesAttachments="false" sendsAttachments="false" anonymous="optional"><con:settings/><con:call id="fe2195e0-b095-40c7-9da3-8ade0599dfc5" name="Request to OrderServiceSoap MockService"><con:settings><con:setting id="com.eviware.soapui.impl.wsdl.WsdlRequest@request-headers">&lt;xml-fragment/></con:setting></con:settings><con:encoding>UTF-8</con:encoding><con:endpoint>http://localhost:8088/mockOrderServiceSoap/OrderWebServiceEx/OrderService.asmx</con:endpoint><con:request><![CDATA[<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:tem="http://tempuri.org/">\r
+   <soapenv:Header/>\r
+   <soapenv:Body>\r
+      <tem:SearchArticles>\r
+         <!--Optional:-->\r
+         <tem:ArticleNamePattern>ALL</tem:ArticleNamePattern>\r
+      </tem:SearchArticles>\r
+   </soapenv:Body>\r
+</soapenv:Envelope>]]></con:request><con:credentials><con:authType>No Authorization</con:authType></con:credentials><con:jmsConfig JMSDeliveryMode="PERSISTENT"/><con:jmsPropertyConfig/><con:wsaConfig mustUnderstand="NONE" version="200508" action="http://tempuri.org/SearchArticles"/><con:wsrmConfig version="1.2"/></con:call><con:call id="07a15e01-2c50-4967-8849-d313bb4103cf" name="Request to OrderServiceSoap12 MockService"><con:settings/><con:encoding>UTF-8</con:encoding><con:endpoint>http://jhernandez8fs3:8088/mockOrderServiceSoap</con:endpoint><con:wsaConfig mustUnderstand="NONE" version="200508" action="http://tempuri.org/SearchArticles"/></con:call></con:operation></con:interface><con:mockService id="284ab7bd-633f-4c43-9be2-e620fea7defd" port="8088" path="/mockOrderServiceSoap12" host="localhost" name="OrderServiceSoap12 MockService"><con:settings><con:setting id="com.eviware.soapui.impl.wsdl.mock.WsdlMockService@require-soap-action">false</con:setting></con:settings><con:properties/><con:mockOperation name="SearchArticles" id="dd060a81-4bcc-4700-b351-8b72089ec5ba" interface="OrderServiceSoap12" operation="SearchArticles"><con:settings/><con:defaultResponse>Response 1</con:defaultResponse><con:dispatchStyle>SEQUENCE</con:dispatchStyle><con:response name="Response 1" id="3dabe716-8387-4cb3-bf29-5d53f0dd83e8" httpResponseStatus="200" encoding="UTF-8"><con:settings/><con:responseContent><![CDATA[<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope" xmlns:tem="http://tempuri.org/">
+   <soap:Header/>
+   <soap:Body>
+      <tem:SearchArticlesResponse>
+         <tem:SearchArticlesResult>
+            <tem:Article>
+               <tem:ArticleId>1</tem:ArticleId>
+               <tem:Name>Lord of the Rings - Fellowship of the Ring</tem:Name>
+               <tem:Price>34.99</tem:Price>
+            </tem:Article>
+            <tem:Article>
+               <tem:ArticleId>2</tem:ArticleId>
+               <tem:Name>Jurassic Park</tem:Name>
+               <tem:Price>14.99</tem:Price>
+            </tem:Article>
+            <tem:Article>
+               <tem:ArticleId>3</tem:ArticleId>
+               <tem:Name>The Breakfast Club</tem:Name>
+               <tem:Price>5.97</tem:Price>
+            </tem:Article>
+            <tem:Article>
+               <tem:ArticleId>4</tem:ArticleId>
+               <tem:Name>Gladiator II</tem:Name>
+               <tem:Price>11.95</tem:Price>
+            </tem:Article>
+            <tem:Article>
+               <tem:ArticleId>5</tem:ArticleId>
+               <tem:Name>Toy Story 4</tem:Name>
+               <tem:Price>24.90</tem:Price>
+            </tem:Article>
+         </tem:SearchArticlesResult>
+      </tem:SearchArticlesResponse>
+   </soap:Body>
+</soap:Envelope>]]></con:responseContent><con:wsaConfig mustUnderstand="NONE" version="200508" action="http://tempuri.org/OrderServiceSoap/SearchArticlesResponse"/></con:response><con:dispatchConfig/></con:mockOperation></con:mockService><con:mockService id="012677e6-8351-4684-b5f3-86a1aee491c7" port="8088" path="/mockOrderServiceSoap" host="localhost" name="OrderServiceSoap MockService"><con:settings><con:setting id="com.eviware.soapui.impl.wsdl.mock.WsdlMockService@require-soap-action">false</con:setting></con:settings><con:properties/><con:mockOperation name="GetArticleById" id="0ebcc86c-db12-4f96-98a8-313dba87bd9b" interface="OrderServiceSoap" operation="GetArticleById"><con:settings/><con:defaultResponse>desconocido</con:defaultResponse><con:dispatchStyle>XPATH</con:dispatchStyle><con:dispatchPath>declare namespace tem='http://tempuri.org/'; //tem:ArticleId</con:dispatchPath><con:response name="1" id="4019c889-3102-4c97-9466-a6cfb98e8c83" httpResponseStatus="200" encoding="UTF-8"><con:settings/><con:responseContent><![CDATA[<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:tem="http://tempuri.org/">
+   <soapenv:Header/>
+   <soapenv:Body>
+      <tem:GetArticleByIdResponse>
+         <tem:GetArticleByIdResult>
+            <tem:ArticleId>1</tem:ArticleId>
+            <tem:Name>Lord of the Rings - Fellowship of the Ring</tem:Name>
+            <tem:Price>34.99</tem:Price>
+         </tem:GetArticleByIdResult>
+      </tem:GetArticleByIdResponse>
+   </soapenv:Body>
+</soapenv:Envelope>]]></con:responseContent><con:wsaConfig mustUnderstand="NONE" version="200508" action="http://tempuri.org/OrderServiceSoap/GetArticleByIdResponse"/></con:response><con:response name="2" id="941fb974-d49e-4427-b658-28f2842f36db" httpResponseStatus="200" encoding="UTF-8"><con:settings/><con:responseContent><![CDATA[<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:tem="http://tempuri.org/">
+   <soapenv:Header/>
+   <soapenv:Body>
+      <tem:GetArticleByIdResponse>
+         <tem:GetArticleByIdResult>
+            <tem:ArticleId>2</tem:ArticleId>
+            <tem:Name>Jurassic Park</tem:Name>
+            <tem:Price>14.99</tem:Price>
+         </tem:GetArticleByIdResult>
+      </tem:GetArticleByIdResponse>
+   </soapenv:Body>
+</soapenv:Envelope>]]></con:responseContent><con:wsaConfig mustUnderstand="NONE" version="200508" action="http://tempuri.org/OrderServiceSoap/GetArticleByIdResponse"/></con:response><con:response name="3" id="86f680af-83b4-4b64-8a1e-d58c3384a7db" httpResponseStatus="200" encoding="UTF-8"><con:settings/><con:responseContent><![CDATA[<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:tem="http://tempuri.org/">
+   <soapenv:Header/>
+   <soapenv:Body>
+      <tem:GetArticleByIdResponse>
+         <tem:GetArticleByIdResult>
+            <tem:ArticleId>3</tem:ArticleId>
+            <tem:Name>The Breakfast Club</tem:Name>
+            <tem:Price>5.97</tem:Price>
+         </tem:GetArticleByIdResult>
+      </tem:GetArticleByIdResponse>
+   </soapenv:Body>
+</soapenv:Envelope>]]></con:responseContent><con:wsaConfig mustUnderstand="NONE" version="200508" action="http://tempuri.org/OrderServiceSoap/GetArticleByIdResponse"/></con:response><con:response name="4" id="fe8c6ff5-9900-49e8-96fa-9208c75fda06" httpResponseStatus="200" encoding="UTF-8"><con:settings/><con:responseContent><![CDATA[<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:tem="http://tempuri.org/">
+   <soapenv:Header/>
+   <soapenv:Body>
+      <tem:GetArticleByIdResponse>
+         <tem:GetArticleByIdResult>
+            <tem:ArticleId>4</tem:ArticleId>
+            <tem:Name>Gladiator II</tem:Name>
+            <tem:Price>11.95</tem:Price>
+         </tem:GetArticleByIdResult>
+      </tem:GetArticleByIdResponse>
+   </soapenv:Body>
+</soapenv:Envelope>]]></con:responseContent><con:wsaConfig mustUnderstand="NONE" version="200508" action="http://tempuri.org/OrderServiceSoap/GetArticleByIdResponse"/></con:response><con:response name="5" id="2c8877a7-2b69-4403-b0bc-c0c37cbf3176" httpResponseStatus="200" encoding="UTF-8"><con:settings/><con:responseContent><![CDATA[<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:tem="http://tempuri.org/">
+   <soapenv:Header/>
+   <soapenv:Body>
+      <tem:GetArticleByIdResponse>
+         <tem:GetArticleByIdResult>
+            <tem:ArticleId>5</tem:ArticleId>
+            <tem:Name>Toy Story 4</tem:Name>
+            <tem:Price>24.90</tem:Price>
+         </tem:GetArticleByIdResult>
+      </tem:GetArticleByIdResponse>
+   </soapenv:Body>
+</soapenv:Envelope>]]></con:responseContent><con:wsaConfig mustUnderstand="NONE" version="200508" action="http://tempuri.org/OrderServiceSoap/GetArticleByIdResponse"/></con:response><con:response name="desconocido" id="319f6888-52c0-435a-b62d-b079a66ab3f4" httpResponseStatus="200" encoding="UTF-8"><con:settings/><con:responseContent><![CDATA[<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:tem="http://tempuri.org/">
+   <soapenv:Header/>
+   <soapenv:Body>
+      <tem:GetArticleByIdResponse/>
+   </soapenv:Body>
+</soapenv:Envelope>]]></con:responseContent><con:wsaConfig mustUnderstand="NONE" version="200508" action="http://tempuri.org/OrderServiceSoap/GetArticleByIdResponse"/></con:response><con:dispatchConfig/></con:mockOperation><con:mockOperation name="SearchArticles" id="7b934576-c321-491a-8ebb-d9b1cea38eda" interface="OrderServiceSoap" operation="SearchArticles"><con:settings/><con:defaultResponse>Response 1</con:defaultResponse><con:dispatchStyle>SEQUENCE</con:dispatchStyle><con:response name="Response 1" id="56fc56b0-b514-4400-98de-df71a9818ae4" httpResponseStatus="200" encoding="UTF-8"><con:settings/><con:responseContent><![CDATA[<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:tem="http://tempuri.org/">
+   <soapenv:Header/>
+   <soapenv:Body>
+      <tem:SearchArticlesResponse>
+         <tem:SearchArticlesResult>
+            <tem:Article>
+               <tem:ArticleId>1</tem:ArticleId>
+               <tem:Name>Lord of the Rings - Fellowship of the Ring</tem:Name>
+               <tem:Price>34.99</tem:Price>
+            </tem:Article>
+            <tem:Article>
+               <tem:ArticleId>2</tem:ArticleId>
+               <tem:Name>Jurassic Park</tem:Name>
+               <tem:Price>14.99</tem:Price>
+            </tem:Article>
+            <tem:Article>
+               <tem:ArticleId>3</tem:ArticleId>
+               <tem:Name>The Breakfast Club</tem:Name>
+               <tem:Price>5.97</tem:Price>
+            </tem:Article>
+            <tem:Article>
+               <tem:ArticleId>4</tem:ArticleId>
+               <tem:Name>Gladiator II</tem:Name>
+               <tem:Price>11.95</tem:Price>
+            </tem:Article>
+            <tem:Article>
+               <tem:ArticleId>5</tem:ArticleId>
+               <tem:Name>Toy Story 4</tem:Name>
+               <tem:Price>24.90</tem:Price>
+            </tem:Article>
+         </tem:SearchArticlesResult>
+      </tem:SearchArticlesResponse>
+   </soapenv:Body>
+</soapenv:Envelope>]]></con:responseContent><con:wsaConfig mustUnderstand="NONE" version="200508" action="http://tempuri.org/SearchArticles"/></con:response><con:dispatchConfig/></con:mockOperation></con:mockService><con:properties/><con:wssContainer/><con:oAuth2ProfileContainer/><con:oAuth1ProfileContainer/><con:sensitiveInformation/></con:soapui-project>
