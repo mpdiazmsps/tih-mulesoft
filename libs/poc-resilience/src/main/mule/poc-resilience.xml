@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:os="http://www.mulesoft.org/schema/mule/os"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/os http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd
+		http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+	<!--
+	  PoC resilience library (task 10). Apps use it like this:
+	    <import file="poc-resilience.xml"/>
+	    <set-variable variableName="rsSource" value="sftp"/>           source name (its properties: rs.<source>.*)
+	    <set-variable variableName="rsFlow" value="my-read-flow"/>
+	    <flow-ref name="resilience-call"/>                               sets vars.rsResult = {ok, source, payload | reason, message}
+	  Per-source properties (with their defaults):
+	    rs.<source>.failureThreshold = 3      consecutive failures that open the circuit
+	    rs.<source>.openMillis       = 30000  time open before the trial call (half-open)
+	    rs.<source>.timeoutMillis             time limit; the app applies it on its connector (2000 providers, 3000 sftp and crm)
+	  Retries only once and only on a connectivity failure: any error whose identifier is CONNECTIVITY
+	  (HTTP:CONNECTIVITY, SFTP:CONNECTIVITY...) or whose description is Mule's connection failure message
+	  ("Could not establish ..." / "Could not obtain ..."; a refused SFTP connection arrives as UNKNOWN).
+	  Such a failure is reported with reason CONNECTIVITY. A timeout is not retried (D9).
+	  Use it for reads only: a write is never retried blindly.
+	  The circuit state lives in memory (rs-circuit-store); one replica per app is enough (D16).
+	-->
+
+	<os:config name="rs-os-config"
+		doc:name="ObjectStore Config"
+		doc:description="Object Store configuration that keeps the circuit state of each source"/>
+
+	<os:object-store name="rs-circuit-store" persistent="false" config-ref="rs-os-config"
+		doc:name="rs-circuit-store"
+		doc:description="Per source: consecutive failures and the moment the circuit opened; in memory, reset when the app restarts"/>
+
+	<!-- ======================================================== resilience-call -->
+	<sub-flow name="resilience-call"
+		doc:name="resilience-call"
+		doc:description="Calls flow vars.rsFlow with a per-source circuit breaker and one retry on connectivity; sets vars.rsResult">
+		<os:retrieve key="#[output application/java --- vars.rsSource]" objectStore="rs-circuit-store" target="rsState"
+			doc:name="retrieve-circuit-state"
+			doc:description="Reads the consecutive failures and the opening time of the source circuit">
+			<os:default-value><![CDATA[#[output application/java --- { failures: 0, openedAt: null }]]]></os:default-value>
+		</os:retrieve>
+		<set-variable variableName="rsThreshold"
+			value="#[output application/java --- (p('rs.' ++ vars.rsSource ++ '.failureThreshold') default 3) as Number]"
+			doc:name="set-failure-threshold"
+			doc:description="Consecutive failures that open the circuit: rs.source.failureThreshold, 3 by default"/>
+		<set-variable variableName="rsOpenMillis"
+			value="#[output application/java --- (p('rs.' ++ vars.rsSource ++ '.openMillis') default 30000) as Number]"
+			doc:name="set-open-millis"
+			doc:description="Milliseconds the circuit stays open: rs.source.openMillis, 30000 by default"/>
+		<choice doc:name="choice-circuit-open"
+			doc:description="If the circuit is open and its time has not expired, answers right away without calling the source">
+			<when expression="#[output application/java --- vars.rsState.openedAt != null and ((now() as Number {unit: 'milliseconds'}) - vars.rsState.openedAt) &lt; vars.rsOpenMillis]"
+				doc:name="when-circuit-open"
+				doc:description="The circuit is still open: the source is not called">
+				<set-variable variableName="rsResult"
+					value="#[output application/java --- { ok: false, source: vars.rsSource, reason: 'CIRCUIT_OPEN', message: 'Circuit open for ' ++ vars.rsSource }]"
+					doc:name="set-result-circuit-open"
+					doc:description="Marks the source as unavailable because the circuit is open"/>
+			</when>
+			<otherwise doc:name="otherwise-closed-or-half-open"
+				doc:description="Calls the source; if the open time expired, this is the trial call">
+				<try doc:name="try-first-attempt" doc:description="Runs the source read flow">
+					<flow-ref name="#[vars.rsFlow]" doc:name="flow-ref-call-source" doc:description="Runs the read flow named in vars.rsFlow"/>
+					<flow-ref name="rs-record-success" doc:name="flow-ref-record-success" doc:description="Closes the circuit and sets the OK result"/>
+					<error-handler>
+						<on-error-continue enableNotifications="false" logException="false"
+							when="#[output application/java --- (error.errorType.identifier == 'CONNECTIVITY') or ((error.description default '') startsWith 'Could not establish') or ((error.description default '') startsWith 'Could not obtain')]"
+							doc:name="on-error-connectivity-retry"
+							doc:description="On a connectivity failure, retries exactly once">
+							<try doc:name="try-retry" doc:description="Second and last attempt after a connectivity failure">
+								<flow-ref name="#[vars.rsFlow]" doc:name="flow-ref-retry-source" doc:description="Runs the read flow again, only once"/>
+								<flow-ref name="rs-record-success" doc:name="flow-ref-record-retry-success" doc:description="Closes the circuit and sets the OK result"/>
+								<error-handler>
+									<on-error-continue enableNotifications="false" logException="false" type="ANY"
+										doc:name="on-error-retry-failed"
+										doc:description="The retry failed too: records the failure without raising an error">
+										<flow-ref name="rs-record-failure" doc:name="flow-ref-record-failure" doc:description="Counts the failure and opens the circuit when it reaches the threshold"/>
+									</on-error-continue>
+								</error-handler>
+							</try>
+						</on-error-continue>
+						<on-error-continue enableNotifications="false" logException="false" type="ANY"
+							doc:name="on-error-other-failure"
+							doc:description="Timeout or any other error: no retry, records the failure without raising an error">
+							<flow-ref name="rs-record-failure" doc:name="flow-ref-record-failure" doc:description="Counts the failure and opens the circuit when it reaches the threshold"/>
+						</on-error-continue>
+					</error-handler>
+				</try>
+			</otherwise>
+		</choice>
+	</sub-flow>
+
+	<sub-flow name="rs-record-success"
+		doc:name="rs-record-success"
+		doc:description="The source answered: resets the failures, closes the circuit and sets the OK result with the response">
+		<os:store key="#[output application/java --- vars.rsSource]" objectStore="rs-circuit-store"
+			doc:name="store-circuit-closed"
+			doc:description="Stores zero failures and a closed circuit for the source">
+			<os:value><![CDATA[#[output application/java --- { failures: 0, openedAt: null }]]]></os:value>
+		</os:store>
+		<set-variable variableName="rsResult" value="#[output application/java --- { ok: true, source: vars.rsSource, payload: payload }]"
+			doc:name="set-result-ok"
+			doc:description="Marks the source as available and keeps its response"/>
+	</sub-flow>
+
+	<sub-flow name="rs-record-failure"
+		doc:name="rs-record-failure"
+		doc:description="The source failed: counts the failure, opens the circuit at the threshold and sets the unavailable result">
+		<set-variable variableName="rsFailures" value="#[output application/java --- (vars.rsState.failures default 0) + 1]"
+			doc:name="set-failure-count"
+			doc:description="Consecutive failures of the source, including this one"/>
+		<os:store key="#[output application/java --- vars.rsSource]" objectStore="rs-circuit-store"
+			doc:name="store-failures"
+			doc:description="Stores the failures; at the threshold also stores the time the circuit opened">
+			<os:value><![CDATA[#[output application/java --- { failures: vars.rsFailures, openedAt: if (vars.rsFailures >= vars.rsThreshold) (now() as Number {unit: 'milliseconds'}) else null }]]]></os:value>
+		</os:store>
+		<set-variable variableName="rsResult"
+			value="#[output application/java --- { ok: false, source: vars.rsSource, reason: if ((error.errorType.identifier == 'CONNECTIVITY') or ((error.description default '') startsWith 'Could not establish') or ((error.description default '') startsWith 'Could not obtain')) 'CONNECTIVITY' else error.errorType.identifier, message: error.description }]"
+			doc:name="set-result-unavailable"
+			doc:description="Marks the source as unavailable with the failure reason"/>
+	</sub-flow>
+
+	<!-- ============================================== resilience-partial-marker -->
+	<sub-flow name="resilience-partial-marker"
+		doc:name="resilience-partial-marker"
+		doc:description="From the rsResult of each source builds vars.sources: OK or UNAVAILABLE per source and providers n of m">
+		<ee:transform doc:name="transform-mark-sources"
+			doc:description="provider-* sources are counted together as n of m; the rest are OK or UNAVAILABLE">
+			<ee:message/>
+			<ee:variables>
+				<ee:set-variable variableName="sources"><![CDATA[%dw 2.0
+output application/java
+var results = vars.rsResults default []
+var providers = results filter ((r) -> (r.source default '') startsWith 'provider')
+var others = results filter ((r) -> not ((r.source default '') startsWith 'provider'))
+---
+{ (others map ((r) -> { (r.source): if (r.ok default false) 'OK' else 'UNAVAILABLE' })) }
+  ++ (if (isEmpty(providers)) {} else { providers: "$(sizeOf(providers filter ((p) -> p.ok default false))) of $(sizeOf(providers))" })]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+	</sub-flow>
+
+</mule>

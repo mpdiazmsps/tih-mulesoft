@@ -1,0 +1,209 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:os="http://www.mulesoft.org/schema/mule/os"
+	xmlns:munit="http://www.mulesoft.org/schema/mule/munit"
+	xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/os http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd
+		http://www.mulesoft.org/schema/mule/munit http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+		http://www.mulesoft.org/schema/mule/munit-tools http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd">
+
+	<!-- Resilience library tests (task 10). Each test uses its own source so the circuit state
+	     in rs-circuit-store does not leak between tests. -->
+	<munit:config name="poc-resilience-test.xml"/>
+
+	<!-- Source t2 opens for 1 s to test half-open without waiting 30 s (under MUnit each call costs about 100 ms). -->
+	<global-property name="rs.t2.openMillis" value="1000" doc:name="t2-open-millis"/>
+
+	<!-- ===================================================== Mocked sources -->
+	<sub-flow name="test-source-ok" doc:name="test-source-ok" doc:description="Mocked source that answers successfully">
+		<logger level="DEBUG" message="ok" doc:name="exec-ok" doc:description="Counts the runs of the successful source"/>
+		<set-payload value="#[{ value: 'response' }]" doc:name="set-response" doc:description="Mocked source response"/>
+	</sub-flow>
+
+	<sub-flow name="test-source-fail" doc:name="test-source-fail" doc:description="Mocked source that fails with a non-connectivity error">
+		<logger level="DEBUG" message="fail" doc:name="exec-fail" doc:description="Counts the runs of the failing source"/>
+		<raise-error type="APP:FAIL" description="Simulated failure" doc:name="raise-failure" doc:description="Non-connectivity failure"/>
+	</sub-flow>
+
+	<sub-flow name="test-source-fail-t2" doc:name="test-source-fail-t2" doc:description="Mocked failing source used by the half-open test">
+		<raise-error type="APP:FAIL" description="Simulated failure" doc:name="raise-failure-t2" doc:description="Failure that opens the t2 circuit"/>
+	</sub-flow>
+
+	<sub-flow name="test-source-connectivity" doc:name="test-source-connectivity" doc:description="Mocked source with a connectivity failure">
+		<logger level="DEBUG" message="connectivity" doc:name="exec-connectivity" doc:description="Counts the runs of the connectivity-failing source"/>
+		<raise-error type="APP:CONNECTIVITY" description="Connection refused" doc:name="raise-connectivity" doc:description="Simulated connectivity failure"/>
+	</sub-flow>
+
+	<sub-flow name="test-source-timeout" doc:name="test-source-timeout" doc:description="Mocked source that times out">
+		<logger level="DEBUG" message="timeout" doc:name="exec-timeout" doc:description="Counts the runs of the timing-out source"/>
+		<raise-error type="APP:TIMEOUT" description="Timed out" doc:name="raise-timeout" doc:description="Simulated timeout"/>
+	</sub-flow>
+
+	<sub-flow name="test-source-connection-refused" doc:name="test-source-connection-refused" doc:description="Mocked source whose connection is refused and arrives as UNKNOWN (as the SFTP connector does)">
+		<logger level="DEBUG" message="refused" doc:name="exec-refused" doc:description="Counts the runs of the refused source"/>
+		<raise-error type="APP:UNKNOWN" description="Could not establish SFTP connection with host: 'localhost' at port: '2223'" doc:name="raise-refused" doc:description="Connection refused reported as UNKNOWN"/>
+	</sub-flow>
+
+	<!-- MUnit lazily initializes only what is referenced statically. resilience-call calls the source
+	     through a dynamic flow-ref (vars.rsFlow), so every flow passed to it needs a static reference
+	     that never runs. App tests that use resilience-call need the same. -->
+	<munit:before-suite name="poc-resilience-static-references" description="Static references to the mocked sources">
+		<choice doc:name="choice-never-runs" doc:description="Only makes MUnit initialize the mocked sources">
+			<when expression="#[false]" doc:name="when-static-references">
+				<flow-ref name="test-source-ok" doc:name="ok"/>
+				<flow-ref name="test-source-fail" doc:name="fail"/>
+				<flow-ref name="test-source-fail-t2" doc:name="fail t2"/>
+				<flow-ref name="test-source-connectivity" doc:name="connectivity"/>
+				<flow-ref name="test-source-timeout" doc:name="timeout"/>
+				<flow-ref name="test-source-connection-refused" doc:name="refused"/>
+			</when>
+		</choice>
+	</munit:before-suite>
+
+	<!-- ============================================================= Tests -->
+	<munit:test name="circuitOpensAfterThreeFailures"
+		description="Three consecutive failures open the circuit; the fourth call returns ok false right away without running the source">
+		<munit:execution>
+			<set-variable variableName="rsSource" value="t1" doc:name="Source t1"/>
+			<set-variable variableName="rsFlow" value="test-source-fail" doc:name="Failing flow"/>
+			<flow-ref name="resilience-call" doc:name="Failure 1"/>
+			<flow-ref name="resilience-call" doc:name="Failure 2"/>
+			<flow-ref name="resilience-call" doc:name="Failure 3"/>
+			<set-variable variableName="t0" value="#[now() as Number {unit: 'milliseconds'}]" doc:name="Start time"/>
+			<flow-ref name="resilience-call" doc:name="Fourth call"/>
+			<set-variable variableName="elapsed" value="#[(now() as Number {unit: 'milliseconds'}) - vars.t0]" doc:name="Elapsed"/>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:verify-call processor="logger" times="3" doc:name="Source ran 3 times">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="exec-fail"/>
+				</munit-tools:with-attributes>
+			</munit-tools:verify-call>
+			<munit-tools:assert-that expression="#[vars.rsResult.ok]" is="#[MunitTools::equalTo(false)]" doc:name="ok false"/>
+			<munit-tools:assert-that expression="#[vars.rsResult.reason]" is="#[MunitTools::equalTo('CIRCUIT_OPEN')]" doc:name="Circuit open"/>
+			<munit-tools:assert-that expression="#[vars.rsResult.source]" is="#[MunitTools::equalTo('t1')]" doc:name="Source t1"/>
+			<!-- Does not wait for the source time limit (2 to 3 s). Under MUnit with coverage each processor costs about 10 ms, hence the margin. -->
+			<munit-tools:assert-that expression="#[vars.elapsed]" is="#[MunitTools::lessThan(500)]" doc:name="Answers without waiting"/>
+		</munit:validation>
+	</munit:test>
+
+	<munit:test name="circuitHalfOpenClosesOnSuccess"
+		description="With openMillis of 1 s, the first successful call after the wait closes the circuit">
+		<munit:execution>
+			<set-variable variableName="rsSource" value="t2" doc:name="Source t2"/>
+			<set-variable variableName="rsFlow" value="test-source-fail-t2" doc:name="Failing flow"/>
+			<flow-ref name="resilience-call" doc:name="Failure 1"/>
+			<flow-ref name="resilience-call" doc:name="Failure 2"/>
+			<flow-ref name="resilience-call" doc:name="Failure 3"/>
+			<flow-ref name="resilience-call" doc:name="While open"/>
+			<set-variable variableName="whileOpen" value="#[vars.rsResult.reason]" doc:name="Reason while open"/>
+			<munit-tools:sleep time="1100" doc:name="Wait for openMillis to expire"/>
+			<set-variable variableName="rsFlow" value="test-source-ok" doc:name="Successful flow"/>
+			<flow-ref name="resilience-call" doc:name="Trial call"/>
+			<os:retrieve key="t2" objectStore="rs-circuit-store" target="state" doc:name="t2 state"/>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[vars.whileOpen]" is="#[MunitTools::equalTo('CIRCUIT_OPEN')]" doc:name="Was open"/>
+			<munit-tools:assert-that expression="#[vars.rsResult.ok]" is="#[MunitTools::equalTo(true)]" doc:name="Trial call answered"/>
+			<munit-tools:assert-that expression="#[vars.rsResult.payload.value]" is="#[MunitTools::equalTo('response')]" doc:name="Carries the response"/>
+			<munit-tools:assert-that expression="#[vars.state.failures]" is="#[MunitTools::equalTo(0)]" doc:name="Failures at 0"/>
+			<munit-tools:assert-that expression="#[vars.state.openedAt]" is="#[MunitTools::nullValue()]" doc:name="Circuit closed"/>
+		</munit:validation>
+	</munit:test>
+
+	<munit:test name="retryOnlyOnConnectivity"
+		description="A connectivity failure is retried once (2 runs); a timeout is not retried (1 run)">
+		<munit:execution>
+			<set-variable variableName="rsSource" value="t3" doc:name="Source t3"/>
+			<set-variable variableName="rsFlow" value="test-source-connectivity" doc:name="Connectivity flow"/>
+			<flow-ref name="resilience-call" doc:name="Connectivity call"/>
+			<set-variable variableName="connectivityResult" value="#[vars.rsResult]" doc:name="Connectivity result"/>
+			<set-variable variableName="rsSource" value="t4" doc:name="Source t4"/>
+			<set-variable variableName="rsFlow" value="test-source-timeout" doc:name="Timeout flow"/>
+			<flow-ref name="resilience-call" doc:name="Timeout call"/>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:verify-call processor="logger" times="2" doc:name="Connectivity: 2 runs">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="exec-connectivity"/>
+				</munit-tools:with-attributes>
+			</munit-tools:verify-call>
+			<munit-tools:verify-call processor="logger" times="1" doc:name="Timeout: 1 run">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="exec-timeout"/>
+				</munit-tools:with-attributes>
+			</munit-tools:verify-call>
+			<munit-tools:assert-that expression="#[vars.connectivityResult.reason]" is="#[MunitTools::equalTo('CONNECTIVITY')]" doc:name="Connectivity reason"/>
+			<munit-tools:assert-that expression="#[vars.rsResult.ok]" is="#[MunitTools::equalTo(false)]" doc:name="Timeout ok false"/>
+			<munit-tools:assert-that expression="#[vars.rsResult.reason]" is="#[MunitTools::equalTo('TIMEOUT')]" doc:name="Timeout reason"/>
+		</munit:validation>
+	</munit:test>
+
+	<munit:test name="partialMarkerCountsProviders"
+		description="With 2 providers OK and 1 failed, sources.providers is 2 of 3; the other sources are marked OK or UNAVAILABLE">
+		<munit:execution>
+			<set-variable variableName="rsResults" doc:name="Source results"
+				value="#[[ { ok: true, source: 'provider-fak' }, { ok: true, source: 'provider-esc' }, { ok: false, source: 'provider-bor', reason: 'TIMEOUT' }, { ok: true, source: 'erp' }, { ok: false, source: 'crm', reason: 'CIRCUIT_OPEN' }, { ok: true, source: 'logistics' } ]]"/>
+			<flow-ref name="resilience-partial-marker" doc:name="Mark sources"/>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[vars.sources.providers]" is="#[MunitTools::equalTo('2 of 3')]" doc:name="providers 2 of 3"/>
+			<munit-tools:assert-that expression="#[vars.sources.erp]" is="#[MunitTools::equalTo('OK')]" doc:name="erp OK"/>
+			<munit-tools:assert-that expression="#[vars.sources.crm]" is="#[MunitTools::equalTo('UNAVAILABLE')]" doc:name="crm UNAVAILABLE"/>
+			<munit-tools:assert-that expression="#[vars.sources.logistics]" is="#[MunitTools::equalTo('OK')]" doc:name="logistics OK"/>
+		</munit:validation>
+	</munit:test>
+
+	<munit:test name="partialMarkerWithoutProviders"
+		description="Without provider results, sources.providers is absent">
+		<munit:execution>
+			<set-variable variableName="rsResults" value="#[[ { ok: false, source: 'logistics', reason: 'CONNECTIVITY' } ]]" doc:name="Logistics only"/>
+			<flow-ref name="resilience-partial-marker" doc:name="Mark sources"/>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[vars.sources.logistics]" is="#[MunitTools::equalTo('UNAVAILABLE')]" doc:name="logistics UNAVAILABLE"/>
+			<munit-tools:assert-that expression="#[vars.sources.providers]" is="#[MunitTools::nullValue()]" doc:name="No providers"/>
+		</munit:validation>
+	</munit:test>
+
+	<munit:test name="resilienceCallWithJsonSourceName"
+		description="The source name comes from a JSON payload (as in a real HTTP request): resilience-call still works">
+		<munit:behavior>
+			<munit:set-event>
+				<munit:payload value='#[output application/json --- { source: "t5" }]' mediaType="application/json"/>
+			</munit:set-event>
+		</munit:behavior>
+		<munit:execution>
+			<set-variable variableName="rsSource" value="#[payload.source]" doc:name="Source from JSON"/>
+			<set-variable variableName="rsFlow" value="test-source-ok" doc:name="Successful flow"/>
+			<flow-ref name="resilience-call" doc:name="Call"/>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[vars.rsResult.ok]" is="#[MunitTools::equalTo(true)]" doc:name="ok true"/>
+			<munit-tools:assert-that expression="#[vars.rsResult.payload.value]" is="#[MunitTools::equalTo('response')]" doc:name="Carries the response"/>
+		</munit:validation>
+	</munit:test>
+
+	<munit:test name="refusedConnectionAsUnknown_isRetriedAsConnectivity"
+		description="A refused connection that arrives as UNKNOWN with Mule's connection message is retried once and reported as CONNECTIVITY">
+		<munit:execution>
+			<set-variable variableName="rsSource" value="t6" doc:name="Source t6"/>
+			<set-variable variableName="rsFlow" value="test-source-connection-refused" doc:name="Refused flow"/>
+			<flow-ref name="resilience-call" doc:name="Call"/>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:verify-call processor="logger" times="2" doc:name="Refused: 2 runs">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="exec-refused"/>
+				</munit-tools:with-attributes>
+			</munit-tools:verify-call>
+			<munit-tools:assert-that expression="#[vars.rsResult.ok]" is="#[MunitTools::equalTo(false)]" doc:name="ok false"/>
+			<munit-tools:assert-that expression="#[vars.rsResult.reason]" is="#[MunitTools::equalTo('CONNECTIVITY')]" doc:name="Reason CONNECTIVITY"/>
+		</munit:validation>
+	</munit:test>
+
+</mule>
