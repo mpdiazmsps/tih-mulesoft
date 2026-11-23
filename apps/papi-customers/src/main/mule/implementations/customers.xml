@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+		http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+	<!-- Customers live in Salesforce; every call goes to sapi-crm, which already speaks the common Customer format.
+	     papi-customers adds the business rules: email or phone required, and a registered email cannot repeat. -->
+
+	<!-- ===================================================================== GET /customers -->
+	<flow name="customers-list-flow" doc:name="customers-list-flow"
+		doc:description="One mode per call (ids, email/phone, or page); passes the query to sapi-crm GET /contacts">
+		<ee:transform doc:name="transform-contacts-query" doc:description="Query parameters for sapi-crm; ids with email/phone is invalid">
+			<ee:message/>
+			<ee:variables>
+				<ee:set-variable variableName="crmQuery"><![CDATA[%dw 2.0
+output application/java
+var q = attributes.queryParams default {}
+---
+{
+	invalid: (not isEmpty(q.ids default "")) and ((q.email != null) or (q.phone != null)),
+	params: { (ids: q.ids) if (q.ids != null), (email: q.email) if (q.email != null), (phone: q.phone) if (q.phone != null),
+		(page: q.page) if (q.page != null), (size: q.size) if (q.size != null) }
+}]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+		<choice doc:name="choice-mixed-modes" doc:description="ids cannot be combined with email or phone">
+			<when expression="#[vars.crmQuery.invalid]" doc:name="when-mixed-modes" doc:description="Two modes in one call">
+				<raise-error type="APP:VALIDATION_ERROR" description="Use one mode per call: ids, email/phone, or page and size"
+					doc:name="raise-mixed-modes" doc:description="Returns 400"/>
+			</when>
+		</choice>
+		<http:request method="GET" config-ref="sapi-crm-http-config" path="/contacts"
+			doc:name="http-request-crm-contacts" doc:description="One call to sapi-crm (a batch of ids is a single SOQL query there)">
+			<http:headers>#[output application/java --- { 'x-correlation-id': correlationId }]</http:headers>
+			<http:query-params>#[vars.crmQuery.params]</http:query-params>
+		</http:request>
+	</flow>
+
+	<!-- ============================================================= GET /customers/{customerId} -->
+	<flow name="customers-get-flow" doc:name="customers-get-flow" doc:description="One customer by Salesforce Id; 404 when it does not exist">
+		<try doc:name="try-get-contact" doc:description="sapi-crm answers 404 for an unknown Id">
+			<http:request method="GET" config-ref="sapi-crm-http-config" path="#[output application/java --- '/contacts/' ++ attributes.uriParams.customerId]"
+				doc:name="http-request-crm-contact" doc:description="Gets the contact from sapi-crm">
+				<http:headers>#[output application/java --- { 'x-correlation-id': correlationId }]</http:headers>
+			</http:request>
+			<error-handler>
+				<on-error-propagate type="HTTP:NOT_FOUND" logException="false"
+					doc:name="on-error-contact-not-found" doc:description="The contact does not exist in Salesforce">
+					<raise-error type="APP:CUSTOMER_NOT_FOUND" description="The customer does not exist"
+						doc:name="raise-customer-not-found" doc:description="Returns 404"/>
+				</on-error-propagate>
+			</error-handler>
+		</try>
+	</flow>
+
+	<!-- ==================================================================== POST /customers -->
+	<flow name="customers-register-flow" doc:name="customers-register-flow"
+		doc:description="Email or phone required; an existing email returns 409 (search first, Salesforce duplicate rule as the backstop, D22)">
+		<set-variable variableName="customerRequest" value="#[output application/java --- payload]"
+			doc:name="set-customer-request" doc:description="Keeps the request: each HTTP call replaces the payload"/>
+		<logger level="INFO" message="#[output application/java --- 'INIT - Register customer, name: ' ++ vars.customerRequest.name ++ ' correlationId: ' ++ correlationId]"
+			doc:name="logger-register-start" doc:description="Logs the start of the registration"/>
+		<choice doc:name="choice-has-contact-data" doc:description="A customer needs an email or a phone">
+			<when expression="#[isEmpty(vars.customerRequest.email default '') and isEmpty(vars.customerRequest.phone default '')]"
+				doc:name="when-no-contact-data" doc:description="Neither email nor phone">
+				<raise-error type="APP:VALIDATION_ERROR" description="The customer needs an email or a phone"
+					doc:name="raise-no-contact-data" doc:description="Returns 400"/>
+			</when>
+		</choice>
+		<choice doc:name="choice-has-email" doc:description="The duplicate rule is by email">
+			<when expression="#[not isEmpty(vars.customerRequest.email default '')]" doc:name="when-has-email" doc:description="Search the email first">
+				<http:request method="GET" config-ref="sapi-crm-http-config" path="/contacts"
+					doc:name="http-request-crm-search-email" doc:description="Is there already a contact with this email?">
+					<http:headers>#[output application/java --- { 'x-correlation-id': correlationId }]</http:headers>
+					<http:query-params>#[output application/java --- { email: vars.customerRequest.email }]</http:query-params>
+				</http:request>
+				<choice doc:name="choice-email-taken" doc:description="A contact with the email means the customer already exists">
+					<when expression="#[not isEmpty(payload)]" doc:name="when-email-taken" doc:description="The email is registered">
+						<raise-error type="APP:CUSTOMER_ALREADY_EXISTS" description="A customer with this email already exists"
+							doc:name="raise-email-taken" doc:description="Returns 409 without calling Salesforce again"/>
+					</when>
+				</choice>
+			</when>
+		</choice>
+		<http:request method="POST" config-ref="sapi-crm-http-config" path="/contacts"
+			doc:name="http-request-crm-create" doc:description="Creates the contact in Salesforce through sapi-crm; a 409 is a valid answer">
+			<http:body><![CDATA[#[output application/json --- vars.customerRequest]]]></http:body>
+			<http:headers>#[output application/java --- { 'x-correlation-id': correlationId }]</http:headers>
+			<http:response-validator>
+				<http:success-status-code-validator values="200..299,409"/>
+			</http:response-validator>
+		</http:request>
+		<choice doc:name="choice-crm-conflict" doc:description="Two registrations at the same time: the Salesforce duplicate rule blocks the second one (D22)">
+			<when expression="#[attributes.statusCode == 409]" doc:name="when-crm-conflict" doc:description="sapi-crm answered 409 CONTACT_ALREADY_EXISTS">
+				<raise-error type="APP:CUSTOMER_ALREADY_EXISTS" description="A customer with this email already exists"
+					doc:name="raise-customer-already-exists" doc:description="Returns 409"/>
+			</when>
+		</choice>
+		<set-variable variableName="httpStatus" value="#[201]" doc:name="set-http-status-201" doc:description="Customer registered"/>
+		<logger level="INFO" message="#[output application/java --- 'END - Register customer, id: ' ++ (payload.id default '') ++ ' correlationId: ' ++ correlationId]"
+			doc:name="logger-register-end" doc:description="Logs the Salesforce Id of the new customer"/>
+	</flow>
+
+</mule>

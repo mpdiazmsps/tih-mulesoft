@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:apikit="http://www.mulesoft.org/schema/mule/mule-apikit"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+		http://www.mulesoft.org/schema/mule/mule-apikit http://www.mulesoft.org/schema/mule/mule-apikit/current/mule-apikit.xsd">
+
+	<apikit:config name="papi-customers-config"
+		api="resource::9885f017-0660-4c80-a27f-eb006d124bd8:papi-customers:1.0.0:raml:zip:papi-customers.raml"
+		outboundHeadersMapName="outboundHeaders"
+		httpStatusVarName="httpStatus"
+		doc:name="APIkit Router config"
+		doc:description="Validates each request against the papi-customers RAML and routes it to its interface flow"/>
+
+	<flow name="papi-customers-main"
+		doc:name="papi-customers-main"
+		doc:description="HTTP entry point. Errors are handled by the global error handler">
+		<http:listener config-ref="papi-customers-httpListenerConfig" path="${http.listener.basePath}/*"
+			doc:name="Listener"
+			doc:description="Receives requests on the API base path">
+			<http:response statusCode="#[vars.httpStatus default 200]">
+				<http:headers>#[vars.outboundHeaders default {}]</http:headers>
+			</http:response>
+			<http:error-response statusCode="#[vars.httpStatus default 500]">
+				<http:body>#[payload]</http:body>
+				<http:headers>#[vars.outboundHeaders default {}]</http:headers>
+			</http:error-response>
+		</http:listener>
+		<apikit:router config-ref="papi-customers-config"
+			doc:name="APIkit Router"
+			doc:description="Routes the request to the interface flow matching the RAML method and resource"/>
+	</flow>
+
+	<!-- Interface flows with the APIkit scaffolding names: they only delegate to the implementation. Do not rename. -->
+
+	<flow name="get:\customers:papi-customers-config"
+		doc:name="get:\customers"
+		doc:description="List or search customers (ids, email/phone or page)">
+		<flow-ref name="customers-list-flow" doc:name="customers-list-flow"
+			doc:description="Delegates to the customer listing and search"/>
+	</flow>
+
+	<flow name="post:\customers:application\json:papi-customers-config"
+		doc:name="post:\customers"
+		doc:description="Register a customer">
+		<flow-ref name="customers-register-flow" doc:name="customers-register-flow"
+			doc:description="Delegates to the customer registration"/>
+	</flow>
+
+	<flow name="get:\customers\(customerId):papi-customers-config"
+		doc:name="get:\customers\(customerId)"
+		doc:description="Get one customer">
+		<flow-ref name="customers-get-flow" doc:name="customers-get-flow"
+			doc:description="Delegates to the customer lookup"/>
+	</flow>
+
+</mule>

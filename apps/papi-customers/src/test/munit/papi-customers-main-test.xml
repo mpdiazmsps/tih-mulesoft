@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:munit="http://www.mulesoft.org/schema/mule/munit"
+	xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+		http://www.mulesoft.org/schema/mule/munit http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+		http://www.mulesoft.org/schema/mule/munit-tools http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd">
+
+	<!-- End-to-end HTTP tests: real listener (8082), APIkit with the Exchange contract, interface flows,
+	     global error handler and response codes. sapi-crm is mocked. -->
+	<munit:config name="papi-customers-main-test.xml"/>
+
+	<!-- MUnit initializes lazily and APIkit builds its routes from the flows already initialized. -->
+	<munit:before-suite name="papi-customers-main-warm-up">
+		<choice>
+			<when expression="#[false]">
+				<flow-ref name="get:\customers:papi-customers-config"/>
+				<flow-ref name="post:\customers:application\json:papi-customers-config"/>
+				<flow-ref name="get:\customers\(customerId):papi-customers-config"/>
+			</when>
+		</choice>
+	</munit:before-suite>
+
+	<!-- The sapi-crm client also uses HTTP: only the test client below calls the real listener. -->
+	<http:request-config name="test-api-client" doc:name="HTTP Request configuration">
+		<http:request-connection host="localhost" port="8082"/>
+	</http:request-config>
+
+	<munit:test name="api_getCustomer_returns200" description="GET /customers/{customerId} returns 200 with the customer">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="papi-customers-main"/>
+		</munit:enable-flow-sources>
+		<munit:behavior>
+			<munit-tools:mock-when processor="http:request">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-crm-contact"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/json --- { id: '003Hs00000CUMBRAAA', name: 'Constructora Cumbres', email: 'compras@cumbres.ejemplo.mx', phone: '+528181234567', segment: 'STRATEGIC', address: { street: 'Av. Constitución 100', city: 'Monterrey', postalCode: '64000' } }]" mediaType="application/json"/>
+					<munit-tools:attributes value="#[{ statusCode: 200, headers: { 'content-type': 'application/json' } }]"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+		</munit:behavior>
+		<munit:execution>
+			<http:request method="GET" config-ref="test-api-client" path="/api/v1/customers-management/customers/003Hs00000CUMBRAAA">
+				<http:headers><![CDATA[#[{ client_id: 'test-id', client_secret: 'test-secret' }]]]></http:headers>
+				<http:response-validator><http:success-status-code-validator values="0..599"/></http:response-validator>
+			</http:request>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[output application/java --- attributes.statusCode]" is="#[MunitTools::equalTo(200)]"/>
+			<munit-tools:assert-that expression="#[output application/java --- payload.segment]" is="#[MunitTools::equalTo('STRATEGIC')]"/>
+		</munit:validation>
+	</munit:test>
+
+	<munit:test name="api_postWithoutContact_returns400" description="A customer without email and phone returns 400 VALIDATION_ERROR">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="papi-customers-main"/>
+		</munit:enable-flow-sources>
+		<munit:execution>
+			<http:request method="POST" config-ref="test-api-client" path="/api/v1/customers-management/customers">
+				<http:body><![CDATA[#[output application/json --- { name: 'Sin contacto' }]]]></http:body>
+				<http:headers><![CDATA[#[{ client_id: 'test-id', client_secret: 'test-secret', 'Content-Type': 'application/json' }]]]></http:headers>
+				<http:response-validator><http:success-status-code-validator values="0..599"/></http:response-validator>
+			</http:request>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[output application/java --- attributes.statusCode]" is="#[MunitTools::equalTo(400)]"/>
+			<munit-tools:assert-that expression="#[output application/java --- payload.code]" is="#[MunitTools::equalTo('VALIDATION_ERROR')]"/>
+		</munit:validation>
+	</munit:test>
+
+	<munit:test name="api_postDuplicate_returns409" description="An existing email returns 409 CUSTOMER_ALREADY_EXISTS">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="papi-customers-main"/>
+		</munit:enable-flow-sources>
+		<munit:behavior>
+			<munit-tools:mock-when processor="http:request">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-crm-search-email"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/json --- [ { id: '003Hs00000CUMBRAAA', name: 'Constructora Cumbres', email: 'compras@cumbres.ejemplo.mx', phone: '+528181234567', segment: 'STRATEGIC', address: { street: 'Av. Constitución 100', city: 'Monterrey', postalCode: '64000' } } ]]" mediaType="application/json"/>
+					<munit-tools:attributes value="#[{ statusCode: 200, headers: { 'content-type': 'application/json' } }]"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+		</munit:behavior>
+		<munit:execution>
+			<http:request method="POST" config-ref="test-api-client" path="/api/v1/customers-management/customers">
+				<http:body><![CDATA[#[output application/json --- { name: 'Constructora Cumbres 2', email: 'compras@cumbres.ejemplo.mx' }]]]></http:body>
+				<http:headers><![CDATA[#[{ client_id: 'test-id', client_secret: 'test-secret', 'Content-Type': 'application/json' }]]]></http:headers>
+				<http:response-validator><http:success-status-code-validator values="0..599"/></http:response-validator>
+			</http:request>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[output application/java --- attributes.statusCode]" is="#[MunitTools::equalTo(409)]"/>
+			<munit-tools:assert-that expression="#[output application/java --- payload.code]" is="#[MunitTools::equalTo('CUSTOMER_ALREADY_EXISTS')]"/>
+		</munit:validation>
+	</munit:test>
+
+	<munit:test name="api_crmDown_returns503WithRetryAfter" description="With sapi-crm unavailable it returns a retryable 503 with Retry-After">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="papi-customers-main"/>
+		</munit:enable-flow-sources>
+		<munit:behavior>
+			<munit-tools:mock-when processor="http:request">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-crm-contact"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:error typeId="HTTP:SERVICE_UNAVAILABLE"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+		</munit:behavior>
+		<munit:execution>
+			<http:request method="GET" config-ref="test-api-client" path="/api/v1/customers-management/customers/003Hs00000CUMBRAAA">
+				<http:headers><![CDATA[#[{ client_id: 'test-id', client_secret: 'test-secret' }]]]></http:headers>
+				<http:response-validator><http:success-status-code-validator values="0..599"/></http:response-validator>
+			</http:request>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[output application/java --- attributes.statusCode]" is="#[MunitTools::equalTo(503)]"/>
+			<munit-tools:assert-that expression="#[output application/java --- payload.retryable]" is="#[MunitTools::equalTo(true)]"/>
+			<munit-tools:assert-that expression="#[output application/java --- attributes.headers.'retry-after']" is="#[MunitTools::equalTo('30')]"/>
+		</munit:validation>
+	</munit:test>
+
+	<munit:test name="api_getCustomer_invalidId_returns400" description="An Id that is not 18 characters returns 400">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="papi-customers-main"/>
+		</munit:enable-flow-sources>
+		<munit:execution>
+			<http:request method="GET" config-ref="test-api-client" path="/api/v1/customers-management/customers/123">
+				<http:headers><![CDATA[#[{ client_id: 'test-id', client_secret: 'test-secret' }]]]></http:headers>
+				<http:response-validator><http:success-status-code-validator values="0..599"/></http:response-validator>
+			</http:request>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[output application/java --- attributes.statusCode]" is="#[MunitTools::equalTo(400)]"/>
+		</munit:validation>
+	</munit:test>
+
+</mule>

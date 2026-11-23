@@ -1,0 +1,134 @@
+#%RAML 1.0
+title: papi-customers
+version: v1
+baseUri: https://{host}/api/{version}/customers-management
+baseUriParameters:
+  host:
+    description: Public CloudHub 2.0 endpoint of the papi-customers application.
+    type: string
+    example: papi-customers-a1b2c3.usa-e1.cloudhub.io
+protocols: [HTTPS]
+mediaType: application/json
+description: |
+  Manages the store customers on top of the CRM (Salesforce, through sapi-crm): registration, lookup and search,
+  with the customer business rules.
+  - A customer needs an email or a phone.
+  - The customer id is the 18-character Salesforce Id.
+  - An email that already exists returns 409 CUSTOMER_ALREADY_EXISTS. The search in the CRM catches the usual case and
+    the Salesforce duplicate rule catches two registrations at the same time (D22).
+  - Several customers are fetched in one call (`ids`, up to 50) to protect the daily Salesforce API limit.
+
+uses:
+  common: ../fragments/poc-common/poc-common.raml
+
+/customers:
+  get:
+    displayName: List or search customers
+    description: |
+      Use one mode per call:
+      - `ids`: up to 50 customers in one call. Unknown ids are left out.
+      - `email` or `phone`: search; the list may be empty.
+      - No filters: paged listing with `page` and `size`, to pick who buys.
+      Combining modes returns 400.
+    is: [common.secured, common.validated, common.paged, common.bad-gateway, common.retryable]
+    queryParameters:
+      ids:
+        description: Comma-separated Salesforce Ids (up to 50).
+        type: string
+        required: false
+        pattern: '^[a-zA-Z0-9]{18}(,[a-zA-Z0-9]{18}){0,49}$'
+        example: 003Hs00000CUMBRAAA,003Hs00000TAPATAAA
+      email:
+        type: common.Email
+        required: false
+      phone:
+        type: common.Phone
+        required: false
+    responses:
+      200:
+        description: Customers found.
+        body:
+          application/json:
+            type: common.Customer[]
+            example:
+              - id: 003Hs00000CUMBRAAA
+                name: Constructora Cumbres
+                email: compras@cumbres.ejemplo.mx
+                phone: '+528181234567'
+                segment: STRATEGIC
+                address:
+                  street: Av. Constitución 100
+                  city: Monterrey
+                  postalCode: '64000'
+  post:
+    displayName: Register customer
+    description: |
+      Registers the customer in Salesforce. Email or phone is required. When no segment is sent, it is REGULAR.
+      An email that already exists returns 409 CUSTOMER_ALREADY_EXISTS and nothing is created.
+    is: [common.secured, common.validated, common.bad-gateway, common.retryable]
+    body:
+      application/json:
+        type: common.CustomerRequest
+        example:
+          name: Mueblería Del Bajío
+          email: compras@delbajio.ejemplo.mx
+          phone: '+524771234567'
+          address:
+            street: Blvd. López Mateos 800
+            city: León
+            state: Guanajuato
+            postalCode: '37000'
+    responses:
+      201:
+        description: Customer registered with its Salesforce Id.
+        body:
+          application/json:
+            type: common.Customer
+            example:
+              id: 003Hs00000BAJIOAAA
+              name: Mueblería Del Bajío
+              email: compras@delbajio.ejemplo.mx
+              phone: '+524771234567'
+              segment: REGULAR
+              address:
+                street: Blvd. López Mateos 800
+                city: León
+                state: Guanajuato
+                postalCode: '37000'
+      409:
+        description: A customer with the same email already exists. Nothing was created.
+        body:
+          application/json:
+            type: common.ErrorResponse
+            example:
+              code: CUSTOMER_ALREADY_EXISTS
+              message: A customer with this email already exists
+              correlationId: 0b6f2f0e-4a0c-4d25-9a4c-3d9e6a7b1c2d
+              timestamp: 2026-11-20T12:00:00-06:00
+              retryable: false
+
+  /{customerId}:
+    uriParameters:
+      customerId:
+        type: common.SalesforceId
+    get:
+      displayName: Get customer
+      description: A customer with its segment and delivery address. papi-notifications uses it for the contact data.
+      is: [common.secured, common.bad-gateway, common.retryable]
+      responses:
+        200:
+          description: Customer found.
+          body:
+            application/json:
+              type: common.Customer
+        404:
+          description: The customer does not exist.
+          body:
+            application/json:
+              type: common.ErrorResponse
+              example:
+                code: CUSTOMER_NOT_FOUND
+                message: The customer does not exist
+                correlationId: 0b6f2f0e-4a0c-4d25-9a4c-3d9e6a7b1c2d
+                timestamp: 2026-11-20T12:00:00-06:00
+                retryable: false
