@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns:wsc="http://www.mulesoft.org/schema/mule/wsc"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+		http://www.mulesoft.org/schema/mule/wsc http://www.mulesoft.org/schema/mule/wsc/current/mule-wsc.xsd">
+
+	<!-- Shared resilience configuration: resilience-call, circuit store and partial marker (task 10). -->
+	<import file="poc-resilience.xml"/>
+
+	<global-property name="env" value="local"
+		doc:name="Global Property"
+		doc:description="Active environment: local by default; CloudHub passes env=cloud"/>
+
+	<configuration-properties file="properties/${env}-application-config.yaml"
+		doc:name="Configuration properties"
+		doc:description="Environment properties: listener, provider endpoints and per-provider timeouts"/>
+
+	<configuration defaultErrorHandler-ref="global-error-handler"
+		doc:name="Configuration"
+		doc:description="Global error handler: turns any error into the contract ErrorResponse"/>
+
+	<http:listener-config name="sapi-price-providers-httpListenerConfig"
+		doc:name="HTTP Listener config"
+		doc:description="API HTTP listener. Host and port come from the environment properties">
+		<http:listener-connection host="${http.listener.host}" port="${http.listener.port}"
+			doc:description="Opens the environment HTTP port; on CloudHub the load balancer terminates TLS"/>
+	</http:listener-config>
+
+	<http:request-config name="provider-fak-http-config" responseTimeout="${rs.provider-fak.timeoutMillis}"
+		doc:name="provider-fak-http-config"
+		doc:description="HTTP client for provider A (FAK, REST). Endpoint and timeout come from the properties">
+		<http:request-connection protocol="${providers.fak.protocol}" host="${providers.fak.host}" port="${providers.fak.port}"
+			connectionIdleTimeout="30000"
+			doc:description="Connection to the provider A endpoint (WireMock locally, a tunnel on CloudHub)"/>
+	</http:request-config>
+
+	<http:request-config name="provider-esc-http-config" responseTimeout="${rs.provider-esc.timeoutMillis}"
+		doc:name="provider-esc-http-config"
+		doc:description="HTTP client for provider B (ESC, REST). Endpoint and timeout come from the properties">
+		<http:request-connection protocol="${providers.esc.protocol}" host="${providers.esc.host}" port="${providers.esc.port}"
+			connectionIdleTimeout="30000"
+			doc:description="Connection to the provider B endpoint (WireMock locally, a tunnel on CloudHub)"/>
+	</http:request-config>
+
+	<wsc:config name="provider-bor-wsc-config"
+		doc:name="provider-bor-wsc-config"
+		doc:description="SOAP 1.1 client for provider C (BOR, OrderService). WSDL, address and timeout come from the properties">
+		<wsc:connection wsdlLocation="${providers.bor.wsdlLocation}" service="${providers.bor.service}" port="${providers.bor.port}" address="${providers.bor.address}"
+			doc:description="Uses the WSDL packaged in the app and sends requests to the configured address">
+			<wsc:custom-transport-configuration>
+				<wsc:default-http-transport-configuration timeout="${rs.provider-bor.timeoutMillis}"/>
+			</wsc:custom-transport-configuration>
+		</wsc:connection>
+	</wsc:config>
+
+	<!-- Global handler (enabled through defaultErrorHandler-ref). It only translates errors: no business logic. -->
+	<error-handler name="global-error-handler"
+		doc:name="Error Handler"
+		doc:description="Turns any error into the contract ErrorResponse with the matching HTTP status">
+		<on-error-propagate type="ANY" enableNotifications="true" logException="false"
+			doc:name="On Error Propagate"
+			doc:description="Handles APIkit and business (APP) errors">
+			<logger level="ERROR"
+				message="#['ERROR - ' ++ (error.errorType.namespace default 'MULE') ++ ':' ++ (error.errorType.identifier default 'ANY') ++ ' - ' ++ (error.description default '') ++ ' correlationId: ' ++ correlationId]"
+				doc:name="logger-global-error"
+				doc:description="Logs the error type, its description and the correlationId"/>
+			<ee:transform doc:name="transform-resolve-error-info"
+				doc:description="Resolves HTTP status, code, message and retryable flag from the error type">
+				<ee:message/>
+				<ee:variables>
+					<ee:set-variable variableName="errorInfo" resource="dataweave/mapping-error-info.dwl"/>
+				</ee:variables>
+			</ee:transform>
+			<ee:transform doc:name="transform-build-error-response"
+				doc:description="Builds the ErrorResponse, the HTTP status and the Retry-After header when the error is a 503">
+				<ee:message>
+					<ee:set-payload resource="dataweave/mapping-error-response.dwl"/>
+				</ee:message>
+				<ee:variables>
+					<ee:set-variable variableName="httpStatus"><![CDATA[%dw 2.0
+output application/java
+---
+vars.errorInfo.status]]></ee:set-variable>
+					<ee:set-variable variableName="outboundHeaders"><![CDATA[%dw 2.0
+output application/java
+---
+if (vars.errorInfo.status == 503) { "Retry-After": p('error.retryAfterSeconds') } else {}]]></ee:set-variable>
+				</ee:variables>
+			</ee:transform>
+		</on-error-propagate>
+	</error-handler>
+
+</mule>

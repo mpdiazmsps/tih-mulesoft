@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+	<!-- Quotes. Every provider call goes through poc-resilience (source provider-<abv>): 2 s timeout, one retry only
+	     on connectivity and a circuit breaker per provider. A provider that does not know the product is not a failure. -->
+
+	<!-- ======================================= GET /providers/{abv}/products/{externalId}/price -->
+	<flow name="price-get-flow" doc:name="price-get-flow"
+		doc:description="Quotes one product with one provider and translates the result into the contract responses">
+		<set-variable variableName="abv" value="#[output application/java --- attributes.uriParams.providerAbv]"
+			doc:name="set-abv" doc:description="Provider code taken from the path"/>
+		<set-variable variableName="externalId" value="#[output application/java --- attributes.uriParams.externalId as Number]"
+			doc:name="set-external-id" doc:description="Product id at the provider, taken from the path"/>
+		<logger level="INFO" message="#[output application/java --- 'INIT - Get price, provider: ' ++ vars.abv ++ ' externalId: ' ++ vars.externalId ++ ' correlationId: ' ++ correlationId]"
+			doc:name="logger-get-price-start" doc:description="Logs the start of the lookup"/>
+		<flow-ref name="provider-quote-subflow" doc:name="flow-ref-provider-quote"
+			doc:description="Calls the provider through poc-resilience and leaves vars.rsResult"/>
+		<choice doc:name="choice-price-result" doc:description="Translates the provider result into 200, 404, 503 or 502">
+			<when expression="#[vars.rsResult.ok and vars.rsResult.payload.found]" doc:name="when-quoted"
+				doc:description="The provider returned the product">
+				<ee:transform doc:name="transform-quote-response" doc:description="Quote in the contract format">
+					<ee:message>
+						<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+vars.rsResult.payload.quote]]></ee:set-payload>
+					</ee:message>
+				</ee:transform>
+			</when>
+			<when expression="#[vars.rsResult.ok]" doc:name="when-product-not-found"
+				doc:description="The provider answered but does not know the product">
+				<raise-error type="APP:PRODUCT_NOT_FOUND" description="The provider does not know the requested product"
+					doc:name="raise-product-not-found" doc:description="Returns 404"/>
+			</when>
+			<when expression="#[import unavailableReasons from modules::providers --- unavailableReasons contains vars.rsResult.reason]"
+				doc:name="when-provider-unavailable" doc:description="Timeout, connection failure or open circuit">
+				<raise-error type="APP:PROVIDER_UNAVAILABLE" description="#[output application/java --- 'Provider ' ++ vars.abv ++ ' is unavailable (' ++ vars.rsResult.reason ++ ')']"
+					doc:name="raise-provider-unavailable" doc:description="Returns a retryable 503"/>
+			</when>
+			<otherwise doc:name="otherwise-provider-error" doc:description="Any other provider failure">
+				<raise-error type="APP:PROVIDER_ERROR" description="#[output application/java --- 'Provider ' ++ vars.abv ++ ' returned an error (' ++ (vars.rsResult.reason default 'UNKNOWN') ++ ')']"
+					doc:name="raise-provider-error" doc:description="Returns 502"/>
+			</otherwise>
+		</choice>
+		<logger level="INFO" message="#[output application/java --- 'END - Get price, provider: ' ++ vars.abv ++ ' externalId: ' ++ vars.externalId ++ ' correlationId: ' ++ correlationId]"
+			doc:name="logger-get-price-end" doc:description="Logs the end of the lookup"/>
+	</flow>
+
+	<!-- ============================================================== POST /quotes -->
+	<flow name="quotes-post-flow" doc:name="quotes-post-flow"
+		doc:description="Quotes every requested product in parallel; always 200 with the quotes and the providers without response">
+		<logger level="INFO" message="#[output application/java --- 'INIT - Quotes, requests: ' ++ sizeOf(payload) ++ ' correlationId: ' ++ correlationId]"
+			doc:name="logger-quotes-start" doc:description="Logs the start of the quote with the number of requests"/>
+		<parallel-foreach collection="#[payload]" doc:name="parallel-foreach-quote-request"
+			doc:description="One branch per requested product; every branch has its own 2 s provider timeout">
+			<set-variable variableName="abv" value="#[output application/java --- payload.abv]" doc:name="set-abv" doc:description="Provider code of this request"/>
+			<set-variable variableName="externalId" value="#[output application/java --- payload.externalId]" doc:name="set-external-id" doc:description="Product id at the provider"/>
+			<flow-ref name="provider-quote-subflow" doc:name="flow-ref-provider-quote"
+				doc:description="Calls the provider through poc-resilience and leaves vars.rsResult"/>
+			<ee:transform doc:name="transform-quote-outcome" doc:description="Quote, or provider without response with its reason">
+				<ee:message>
+					<ee:set-payload><![CDATA[%dw 2.0
+import outcome from modules::providers
+output application/java
+---
+outcome(vars.abv, vars.externalId, vars.rsResult)]]></ee:set-payload>
+				</ee:message>
+			</ee:transform>
+		</parallel-foreach>
+		<ee:transform doc:name="transform-quote-result" doc:description="Splits the branch outcomes into quotes and noResponse">
+			<ee:message>
+				<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+var outcomes = payload map ((m) -> m.payload)
+---
+{
+	quotes: (outcomes filter ((o) -> o.quote != null)) map ((o) -> o.quote),
+	noResponse: (outcomes filter ((o) -> o.quote == null)) map ((o) -> { abv: o.abv, externalId: o.externalId, reason: o.reason })
+}]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<logger level="INFO" message="#[output application/java --- 'END - Quotes, quotes: ' ++ sizeOf(payload.quotes) ++ ' noResponse: ' ++ sizeOf(payload.noResponse) ++ ' correlationId: ' ++ correlationId]"
+			doc:name="logger-quotes-end" doc:description="Logs how many providers answered and how many did not"/>
+	</flow>
+
+	<!-- ================================================== Resilient call to one provider -->
+	<sub-flow name="provider-quote-subflow" doc:name="provider-quote-subflow"
+		doc:description="Calls provider vars.abv for product vars.externalId through resilience-call; leaves vars.rsResult">
+		<set-variable variableName="rsSource" value="#[output application/java --- 'provider-' ++ lower(vars.abv)]"
+			doc:name="set-rs-source" doc:description="Resilience source of the provider: provider-fak, provider-esc or provider-bor"/>
+		<set-variable variableName="rsFlow" value="#[output application/java --- 'provider-' ++ lower(vars.abv) ++ '-quote-subflow']"
+			doc:name="set-rs-flow" doc:description="Read flow of the provider"/>
+		<flow-ref name="resilience-call" doc:name="flow-ref-resilience-call"
+			doc:description="Circuit breaker, one retry on connectivity; never raises, leaves vars.rsResult"/>
+	</sub-flow>
+
+</mule>

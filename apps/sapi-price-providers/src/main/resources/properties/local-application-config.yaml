@@ -1,0 +1,40 @@
+# Configuration for the local environment (the default one). No credentials: the providers are WireMock simulators.
+http:
+  listener:
+    host: "0.0.0.0"
+    port: "8093"
+    basePath: "/api/v1/price-providers"
+
+# The three providers run in poc-wiremock (infra/docker-compose.yml), port 8089.
+providers:
+  fak:
+    protocol: "HTTP"
+    host: "localhost"
+    port: "8089"
+    basePath: "/proveedor-a/products"
+  esc:
+    protocol: "HTTP"
+    host: "localhost"
+    port: "8089"
+    basePath: "/proveedor-b/api/v1/products"
+  bor:
+    # SOAP 1.1 OrderService. The WSDL is packaged in the app; the address points to the simulator.
+    wsdlLocation: "wsdl/borland-orderservice.wsdl"
+    service: "OrderService"
+    port: "OrderServiceSoap"
+    address: "http://localhost:8089/proveedor-c/OrderService"
+
+# poc-resilience, one source per provider (failureThreshold 3 and openMillis 30000 by default).
+# timeoutMillis is applied by each provider connector: 1.5 s (D9; with the ERP lookup first, Order 360 stays under 3 s
+# even on the first call after a failure is switched on).
+rs:
+  provider-fak:
+    timeoutMillis: "1500"
+  provider-esc:
+    timeoutMillis: "1500"
+  provider-bor:
+    timeoutMillis: "1500"
+
+# Seconds suggested to the consumer in the Retry-After header when a provider is unavailable
+error:
+  retryAfterSeconds: "30"

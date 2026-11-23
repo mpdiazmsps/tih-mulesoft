@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:wsc="http://www.mulesoft.org/schema/mule/wsc"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+		http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+		http://www.mulesoft.org/schema/mule/wsc http://www.mulesoft.org/schema/mule/wsc/current/mule-wsc.xsd">
+
+	<!-- One read flow per provider, called by resilience-call through vars.rsFlow (provider-<abv>-quote-subflow).
+	     Each one returns { found: true, quote } or { found: false }; connector errors propagate to resilience-call. -->
+
+	<!-- ===================================================== Provider A (FAK, REST) -->
+	<sub-flow name="provider-fak-quote-subflow" doc:name="provider-fak-quote-subflow"
+		doc:description="GET /products/{id} on provider A. An unknown id answers 200 with an empty body">
+		<http:request method="GET" config-ref="provider-fak-http-config" path="#[output application/java --- p('providers.fak.basePath') ++ '/' ++ vars.externalId]"
+			doc:name="http-request-provider-fak" doc:description="Calls provider A and expects a JSON product with title, price and currency">
+			<http:headers>#[{ Accept: 'application/json' }]</http:headers>
+		</http:request>
+		<!-- With Content-Length 0 and Content-Type application/json, isEmpty(payload) would try to parse the empty body
+		     and fail, so the header is checked first: "or" does not evaluate isEmpty when Content-Length is already 0. -->
+		<ee:transform doc:name="transform-provider-fak-result" doc:description="Product as a quote, or not found when the body is empty">
+			<ee:message>
+				<ee:set-payload><![CDATA[%dw 2.0
+import found, notFound from modules::providers
+output application/java
+---
+if ((attributes.headers.'content-length' default '') == '0' or isEmpty(payload)) notFound
+else found('FAK', vars.externalId, payload.title, payload.price, payload.currency)]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+	</sub-flow>
+
+	<!-- ===================================================== Provider B (ESC, REST) -->
+	<sub-flow name="provider-esc-quote-subflow" doc:name="provider-esc-quote-subflow"
+		doc:description="GET /api/v1/products/{id} on provider B. An unknown id answers 400">
+		<try doc:name="try-provider-esc" doc:description="Turns the provider B 400 or 404 (unknown product) into not found">
+			<http:request method="GET" config-ref="provider-esc-http-config" path="#[output application/java --- p('providers.esc.basePath') ++ '/' ++ vars.externalId]"
+				doc:name="http-request-provider-esc" doc:description="Calls provider B and expects a JSON product with title, price and currency">
+				<http:headers>#[{ Accept: 'application/json' }]</http:headers>
+			</http:request>
+			<ee:transform doc:name="transform-provider-esc-result" doc:description="Product as a quote">
+				<ee:message>
+					<ee:set-payload><![CDATA[%dw 2.0
+import found from modules::providers
+output application/java
+---
+found('ESC', vars.externalId, payload.title, payload.price, payload.currency)]]></ee:set-payload>
+				</ee:message>
+			</ee:transform>
+			<error-handler>
+				<on-error-continue type="HTTP:BAD_REQUEST, HTTP:NOT_FOUND" logException="false"
+					doc:name="on-error-esc-product-not-found" doc:description="Provider B answers 400 for an unknown id: not a failure">
+					<ee:transform doc:name="transform-provider-esc-not-found" doc:description="The provider does not know the product">
+						<ee:message>
+							<ee:set-payload><![CDATA[%dw 2.0
+import notFound from modules::providers
+output application/java
+---
+notFound]]></ee:set-payload>
+						</ee:message>
+					</ee:transform>
+				</on-error-continue>
+			</error-handler>
+		</try>
+	</sub-flow>
+
+	<!-- ===================================================== Provider C (BOR, SOAP 1.1) -->
+	<sub-flow name="provider-bor-quote-subflow" doc:name="provider-bor-quote-subflow"
+		doc:description="GetArticleById on provider C. An unknown id answers without GetArticleByIdResult">
+		<ee:transform doc:name="transform-provider-bor-request" doc:description="SOAP body GetArticleById with the numeric ArticleId">
+			<ee:message>
+				<ee:set-payload><![CDATA[%dw 2.0
+output application/xml
+ns tem http://tempuri.org/
+---
+{ tem#GetArticleById: { tem#ArticleId: vars.externalId as Number } }]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<wsc:consume config-ref="provider-bor-wsc-config" operation="GetArticleById"
+			doc:name="wsc-consume-provider-bor" doc:description="Calls the GetArticleById operation of provider C">
+			<wsc:message>
+				<wsc:body>#[payload]</wsc:body>
+			</wsc:message>
+		</wsc:consume>
+		<ee:transform doc:name="transform-provider-bor-result" doc:description="Article as a quote (Name, Price, Currency), or not found without a result">
+			<ee:message>
+				<ee:set-payload><![CDATA[%dw 2.0
+import found, notFound from modules::providers
+output application/java
+ns tem http://tempuri.org/
+var result = payload.body.tem#GetArticleByIdResponse.tem#GetArticleByIdResult
+---
+if (result == null) notFound
+else found('BOR', vars.externalId, result.tem#Name, result.tem#Price, result.tem#Currency)]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+	</sub-flow>
+
+</mule>

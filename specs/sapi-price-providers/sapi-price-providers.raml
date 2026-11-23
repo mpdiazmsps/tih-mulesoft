@@ -1,0 +1,88 @@
+#%RAML 1.0
+title: sapi-price-providers
+version: v1
+baseUri: https://{host}/api/{version}/price-providers
+baseUriParameters:
+  host:
+    description: Public CloudHub 2.0 endpoint of the sapi-price-providers application.
+    type: string
+    example: sapi-price-providers-a1b2c3.usa-e1.cloudhub.io
+protocols: [HTTPS]
+mediaType: application/json
+description: |
+  The gateway to the three price providers, simulated with WireMock:
+  - FAK: provider A (REST).
+  - ESC: provider B (REST).
+  - BOR: provider C (SOAP 1.1, operation GetArticleById).
+  It returns quotes in the common format; the currency comes from the provider response.
+  Each provider has a 2 s timeout, one retry only on connection failures, and its own circuit breaker.
+
+uses:
+  common: ../fragments/poc-common/poc-common.raml
+
+/providers/{providerAbv}/products/{externalId}/price:
+  uriParameters:
+    providerAbv:
+      type: common.ProviderAbv
+    externalId:
+      description: Product id at the provider.
+      type: integer
+      minimum: 1
+      example: 3
+  get:
+    displayName: Price from one provider
+    description: Quotes a product with a single provider and translates its response into the common format.
+    is: [common.secured, common.validated, common.not-found, common.bad-gateway, common.retryable]
+    responses:
+      200:
+        description: Provider quote.
+        body:
+          application/json:
+            type: common.Quote
+
+/quotes:
+  post:
+    displayName: Quote with several providers
+    description: |
+      Quotes in parallel with each provider in the list. It always returns 200 within the timeout:
+      providers that timed out or failed are listed in noResponse (partial response).
+    is: [common.secured, common.validated]
+    body:
+      application/json:
+        type: common.QuoteRequest[]
+        minItems: 1
+        maxItems: 10
+        example:
+          - abv: FAK
+            externalId: 7
+          - abv: ESC
+            externalId: 122
+          - abv: BOR
+            externalId: 3
+    responses:
+      200:
+        description: Quotes obtained and providers without response.
+        body:
+          application/json:
+            type: common.QuoteResult
+            example:
+              quotes:
+                - abv: FAK
+                  externalId: 7
+                  name: Producto 100
+                  price: 189.00
+                  currency: MXN
+                  quotedAt: 2026-11-20T12:00:00-06:00
+                - abv: ESC
+                  externalId: 122
+                  name: Producto 100
+                  price: 194.00
+                  currency: MXN
+                  quotedAt: 2026-11-20T12:00:00-06:00
+                - abv: BOR
+                  externalId: 3
+                  name: Producto 100
+                  price: 175.00
+                  currency: MXN
+                  quotedAt: 2026-11-20T12:00:00-06:00
+              noResponse: []

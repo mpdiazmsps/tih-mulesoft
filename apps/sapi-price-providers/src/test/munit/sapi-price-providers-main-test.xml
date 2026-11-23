@@ -1,0 +1,193 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:munit="http://www.mulesoft.org/schema/mule/munit"
+	xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+		http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+		http://www.mulesoft.org/schema/mule/munit http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+		http://www.mulesoft.org/schema/mule/munit-tools http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd">
+
+	<!-- End-to-end HTTP tests: real listener (8093), APIkit with the Exchange contract, interface flows,
+	     global error handler and response codes. Providers are mocked. -->
+	<munit:config name="sapi-price-providers-main-test.xml"/>
+
+	<!-- MUnit initializes lazily: APIkit needs the interface flows and resilience-call needs the provider flows. -->
+	<munit:before-suite name="sapi-price-providers-main-warm-up">
+		<choice>
+			<when expression="#[false]">
+				<flow-ref name="get:\providers\(providerAbv)\products\(externalId)\price:sapi-price-providers-config"/>
+				<flow-ref name="post:\quotes:application\json:sapi-price-providers-config"/>
+				<flow-ref name="provider-fak-quote-subflow"/>
+				<flow-ref name="provider-esc-quote-subflow"/>
+				<flow-ref name="provider-bor-quote-subflow"/>
+			</when>
+		</choice>
+	</munit:before-suite>
+
+	<http:request-config name="test-api-client" doc:name="HTTP Request configuration">
+		<http:request-connection host="localhost" port="8093"/>
+	</http:request-config>
+
+	<!-- ===================================================== Mocked provider C responses -->
+	<flow name="api-mock-bor-sku100-flow">
+		<ee:transform>
+			<ee:message>
+				<ee:set-payload><![CDATA[%dw 2.0
+output application/java
+---
+{ headers: {}, attachments: {}, body: read('<GetArticleByIdResponse xmlns="http://tempuri.org/"><GetArticleByIdResult><ArticleId>3</ArticleId><Name>Producto 100</Name><Price>175.00</Price><Currency>MXN</Currency></GetArticleByIdResult></GetArticleByIdResponse>', 'application/xml') }]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+	</flow>
+
+	<flow name="api-mock-bor-empty-flow">
+		<ee:transform>
+			<ee:message>
+				<ee:set-payload><![CDATA[%dw 2.0
+output application/java
+---
+{ headers: {}, attachments: {}, body: read('<GetArticleByIdResponse xmlns="http://tempuri.org/"/>', 'application/xml') }]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+	</flow>
+
+	<munit:test name="api_postQuotes_sku100_returns200" description="POST /quotes returns 200 with the three SKU-100 quotes">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="sapi-price-providers-main"/>
+		</munit:enable-flow-sources>
+		<munit:behavior>
+			<munit-tools:mock-when processor="http:request">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-provider-fak"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/json --- { id: 7, title: 'Producto 100', price: 189, currency: 'MXN' }]" mediaType="application/json"/>
+					<munit-tools:attributes value="#[{ statusCode: 200, headers: { 'content-type': 'application/json' } }]"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit-tools:mock-when processor="http:request">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-provider-esc"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/json --- { id: 122, title: 'Producto 100', price: 194, currency: 'MXN', category: { id: 1, name: 'general' } }]" mediaType="application/json"/>
+					<munit-tools:attributes value="#[{ statusCode: 200, headers: { 'content-type': 'application/json' } }]"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit-tools:mock-when processor="wsc:consume">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="wsc-consume-provider-bor"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-call flow="api-mock-bor-sku100-flow"/>
+			</munit-tools:mock-when>
+		</munit:behavior>
+		<munit:execution>
+			<http:request method="POST" config-ref="test-api-client" path="/api/v1/price-providers/quotes">
+				<http:body><![CDATA[#[output application/json --- [ { abv: 'FAK', externalId: 7 }, { abv: 'ESC', externalId: 122 }, { abv: 'BOR', externalId: 3 } ]]]]></http:body>
+				<http:headers><![CDATA[#[{ client_id: 'test-id', client_secret: 'test-secret', 'Content-Type': 'application/json' }]]]></http:headers>
+				<http:response-validator><http:success-status-code-validator values="0..599"/></http:response-validator>
+			</http:request>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(200)]"/>
+			<munit-tools:assert-that expression="#[sizeOf(payload.quotes)]" is="#[MunitTools::equalTo(3)]"/>
+			<munit-tools:assert-that expression="#[payload.noResponse]" is="#[MunitTools::equalTo([])]"/>
+		</munit:validation>
+	</munit:test>
+
+	<munit:test name="api_getPrice_unknown_returns404" description="An unknown product returns 404 PRODUCT_NOT_FOUND with the ErrorResponse">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="sapi-price-providers-main"/>
+		</munit:enable-flow-sources>
+		<munit:behavior>
+			<munit-tools:mock-when processor="http:request">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-provider-fak"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#['']" mediaType="application/json"/>
+					<munit-tools:attributes value="#[{ statusCode: 200, headers: { 'content-length': '0', 'content-type': 'application/json' } }]"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+		</munit:behavior>
+		<munit:execution>
+			<http:request method="GET" config-ref="test-api-client" path="/api/v1/price-providers/providers/FAK/products/9999/price">
+				<http:headers><![CDATA[#[{ client_id: 'test-id', client_secret: 'test-secret' }]]]></http:headers>
+				<http:response-validator><http:success-status-code-validator values="0..599"/></http:response-validator>
+			</http:request>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(404)]"/>
+			<munit-tools:assert-that expression="#[payload.code]" is="#[MunitTools::equalTo('PRODUCT_NOT_FOUND')]"/>
+			<munit-tools:assert-that expression="#[payload.retryable]" is="#[MunitTools::equalTo(false)]"/>
+		</munit:validation>
+	</munit:test>
+
+	<munit:test name="api_getPrice_timeout_returns503WithRetryAfter" description="A provider timeout returns a retryable 503 with Retry-After">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="sapi-price-providers-main"/>
+		</munit:enable-flow-sources>
+		<munit:behavior>
+			<munit-tools:mock-when processor="wsc:consume">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="wsc-consume-provider-bor"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:error typeId="WSC:TIMEOUT"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+		</munit:behavior>
+		<munit:execution>
+			<http:request method="GET" config-ref="test-api-client" path="/api/v1/price-providers/providers/BOR/products/3/price">
+				<http:headers><![CDATA[#[{ client_id: 'test-id', client_secret: 'test-secret' }]]]></http:headers>
+				<http:response-validator><http:success-status-code-validator values="0..599"/></http:response-validator>
+			</http:request>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(503)]"/>
+			<munit-tools:assert-that expression="#[payload.code]" is="#[MunitTools::equalTo('SERVICE_UNAVAILABLE')]"/>
+			<munit-tools:assert-that expression="#[payload.retryable]" is="#[MunitTools::equalTo(true)]"/>
+			<munit-tools:assert-that expression="#[attributes.headers.'retry-after']" is="#[MunitTools::equalTo('30')]"/>
+		</munit:validation>
+	</munit:test>
+
+	<munit:test name="api_getPrice_unknownProvider_returns400" description="A provider code outside FAK, ESC and BOR breaks the contract and returns 400">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="sapi-price-providers-main"/>
+		</munit:enable-flow-sources>
+		<munit:execution>
+			<http:request method="GET" config-ref="test-api-client" path="/api/v1/price-providers/providers/XYZ/products/3/price">
+				<http:headers><![CDATA[#[{ client_id: 'test-id', client_secret: 'test-secret' }]]]></http:headers>
+				<http:response-validator><http:success-status-code-validator values="0..599"/></http:response-validator>
+			</http:request>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(400)]"/>
+			<munit-tools:assert-that expression="#[payload.code]" is="#[MunitTools::equalTo('VALIDATION_ERROR')]"/>
+		</munit:validation>
+	</munit:test>
+
+	<munit:test name="api_postQuotes_emptyList_returns400" description="An empty quote list breaks the contract (minItems 1) and returns 400">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="sapi-price-providers-main"/>
+		</munit:enable-flow-sources>
+		<munit:execution>
+			<http:request method="POST" config-ref="test-api-client" path="/api/v1/price-providers/quotes">
+				<http:body><![CDATA[#[output application/json --- []]]]></http:body>
+				<http:headers><![CDATA[#[{ client_id: 'test-id', client_secret: 'test-secret', 'Content-Type': 'application/json' }]]]></http:headers>
+				<http:response-validator><http:success-status-code-validator values="0..599"/></http:response-validator>
+			</http:request>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(400)]"/>
+			<munit-tools:assert-that expression="#[payload.code]" is="#[MunitTools::equalTo('VALIDATION_ERROR')]"/>
+		</munit:validation>
+	</munit:test>
+
+</mule>
