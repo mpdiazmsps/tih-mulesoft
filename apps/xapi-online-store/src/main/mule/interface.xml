@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:apikit="http://www.mulesoft.org/schema/mule/mule-apikit"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+		http://www.mulesoft.org/schema/mule/mule-apikit http://www.mulesoft.org/schema/mule/mule-apikit/current/mule-apikit.xsd">
+
+	<apikit:config name="xapi-online-store-config"
+		api="resource::9885f017-0660-4c80-a27f-eb006d124bd8:xapi-online-store:1.0.0:raml:zip:xapi-online-store.raml"
+		outboundHeadersMapName="outboundHeaders"
+		httpStatusVarName="httpStatus"
+		doc:name="APIkit Router config"
+		doc:description="Validates each request against the xapi-online-store RAML and routes it to its interface flow"/>
+
+	<flow name="xapi-online-store-main"
+		doc:name="xapi-online-store-main"
+		doc:description="HTTP entry point (the API Manager instance applies its policies here). Errors are handled by the global error handler">
+		<http:listener config-ref="xapi-online-store-httpListenerConfig" path="${http.listener.basePath}/*"
+			doc:name="Listener"
+			doc:description="Receives requests on the API base path">
+			<http:response statusCode="#[vars.httpStatus default 200]">
+				<http:headers>#[vars.outboundHeaders default {}]</http:headers>
+			</http:response>
+			<http:error-response statusCode="#[vars.httpStatus default 500]">
+				<http:body>#[payload]</http:body>
+				<http:headers>#[vars.outboundHeaders default {}]</http:headers>
+			</http:error-response>
+		</http:listener>
+		<apikit:router config-ref="xapi-online-store-config"
+			doc:name="APIkit Router"
+			doc:description="Routes the request to the interface flow matching the RAML method and resource"/>
+	</flow>
+
+	<!-- Interface flows with the APIkit scaffolding names: they only delegate to the implementation. Do not rename. -->
+
+	<flow name="get:\products:xapi-online-store-config" doc:name="get:\products" doc:description="Catalog">
+		<flow-ref name="catalog-get-flow" doc:name="catalog-get-flow" doc:description="Delegates to the implementation"/>
+	</flow>
+
+	<flow name="get:\customers:xapi-online-store-config" doc:name="get:\customers" doc:description="List customers">
+		<flow-ref name="customers-list-flow" doc:name="customers-list-flow" doc:description="Delegates to the implementation"/>
+	</flow>
+
+	<flow name="post:\customers:application\json:xapi-online-store-config" doc:name="post:\customers" doc:description="Register customer">
+		<flow-ref name="customers-register-flow" doc:name="customers-register-flow" doc:description="Delegates to the implementation"/>
+	</flow>
+
+	<flow name="get:\customers\(customerId):xapi-online-store-config" doc:name="get:\customers\(customerId)" doc:description="Get customer">
+		<flow-ref name="customer-get-flow" doc:name="customer-get-flow" doc:description="Delegates to the implementation"/>
+	</flow>
+
+	<flow name="get:\orders:xapi-online-store-config" doc:name="get:\orders" doc:description="List orders">
+		<flow-ref name="orders-list-flow" doc:name="orders-list-flow" doc:description="Delegates to the implementation"/>
+	</flow>
+
+	<flow name="post:\orders:application\json:xapi-online-store-config" doc:name="post:\orders" doc:description="Create order">
+		<flow-ref name="orders-create-flow" doc:name="orders-create-flow" doc:description="Delegates to the implementation"/>
+	</flow>
+
+	<flow name="get:\orders\exceptions:xapi-online-store-config" doc:name="get:\orders\exceptions" doc:description="Orders at risk">
+		<flow-ref name="orders-exceptions-flow" doc:name="orders-exceptions-flow" doc:description="Delegates to the implementation"/>
+	</flow>
+
+	<flow name="get:\orders\(orderId):xapi-online-store-config" doc:name="get:\orders\(orderId)" doc:description="Order 360">
+		<flow-ref name="order360-get-flow" doc:name="order360-get-flow" doc:description="Delegates to the implementation"/>
+	</flow>
+
+	<flow name="get:\orders\(orderId)\alternatives:xapi-online-store-config" doc:name="get:\orders\(orderId)\alternatives" doc:description="Alternatives">
+		<flow-ref name="alternatives-get-flow" doc:name="alternatives-get-flow" doc:description="Delegates to the implementation"/>
+	</flow>
+
+	<flow name="post:\order-requests:application\json:xapi-online-store-config" doc:name="post:\order-requests" doc:description="Request a correction">
+		<flow-ref name="requests-create-flow" doc:name="requests-create-flow" doc:description="Delegates to the implementation"/>
+	</flow>
+
+	<flow name="get:\order-requests:xapi-online-store-config" doc:name="get:\order-requests" doc:description="List requests by status">
+		<flow-ref name="requests-list-flow" doc:name="requests-list-flow" doc:description="Delegates to the implementation"/>
+	</flow>
+
+	<flow name="get:\order-requests\(requestId):xapi-online-store-config" doc:name="get:\order-requests\(requestId)" doc:description="Get request">
+		<flow-ref name="request-get-flow" doc:name="request-get-flow" doc:description="Delegates to the implementation"/>
+	</flow>
+
+	<flow name="post:\order-requests\(requestId)\approve:xapi-online-store-config" doc:name="post:\order-requests\(requestId)\approve" doc:description="Approve">
+		<flow-ref name="request-approve-flow" doc:name="request-approve-flow" doc:description="Delegates to the implementation"/>
+	</flow>
+
+	<flow name="post:\order-requests\(requestId)\reject:application\json:xapi-online-store-config" doc:name="post:\order-requests\(requestId)\reject" doc:description="Reject">
+		<flow-ref name="request-reject-flow" doc:name="request-reject-flow" doc:description="Delegates to the implementation"/>
+	</flow>
+
+</mule>

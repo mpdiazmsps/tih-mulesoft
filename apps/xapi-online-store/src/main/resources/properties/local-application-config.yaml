@@ -1,0 +1,37 @@
+# Configuration for the local environment (the default one). The Experience API has no secrets.
+http:
+  listener:
+    host: "0.0.0.0"
+    port: "8080"
+    basePath: "/api/v1/online-store"
+
+# Process APIs. Locally any client_id/client_secret works (Client ID Enforcement only exists in API Manager).
+papi:
+  customers:
+    protocol: "HTTP"
+    host: "localhost"
+    port: "8082"
+    basePath: "/api/v1/customers-management"
+  orders:
+    protocol: "HTTP"
+    host: "localhost"
+    port: "8083"
+    basePath: "/api/v1/orders-management"
+  orderRequests:
+    protocol: "HTTP"
+    host: "localhost"
+    port: "8085"
+    basePath: "/api/v1"
+  # Order 360 and alternatives answer within 3 s; approving waits for papi-orders to apply the correction
+  timeoutMillis: "15000"
+  clientId: "xapi-online-store-local"
+  clientSecret: "xapi-online-store-local"
+
+# API Manager instance. Locally the runtime has no platform credentials and the gateway stays off (see README).
+api:
+  autodiscovery:
+    id: "0"
+
+# Seconds suggested to the consumer in the Retry-After header when a Process API is unavailable
+error:
+  retryAfterSeconds: "30"

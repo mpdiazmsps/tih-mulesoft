@@ -1,0 +1,9 @@
+# Build and Studio output
+target/
+.mule/
+.classpath
+.project
+.settings/
+
+# Local credentials: none for now (the Experience API has no secrets)
+src/main/resources/properties/*-secure-application-config.yaml

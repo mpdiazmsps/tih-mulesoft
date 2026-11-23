@@ -1,0 +1,552 @@
+#%RAML 1.0
+title: xapi-online-store
+version: v1
+baseUri: https://{host}/api/{version}/online-store
+baseUriParameters:
+  host:
+    description: Public CloudHub 2.0 endpoint of the xapi-online-store application.
+    type: string
+    example: xapi-online-store-a1b2c3.usa-e1.cloudhub.io
+protocols: [HTTPS]
+mediaType: application/json
+description: |
+  The only REST door for the online store and the approver. It exposes business capabilities and hides which system
+  answers each one: it only calls the Process APIs (papi-customers, papi-orders and papi-order-requests).
+  - Client ID Enforcement (API Manager): the store, the approver and the traffic generator use different client
+    applications. Without client_id the policy answers 401.
+  - The API passes the client_id of the caller to the Process APIs as `x-client-app`: only the approver application
+    can approve or reject a request (D10); any other one receives 403.
+  - It propagates `x-correlation-id` and answers every error with the common ErrorResponse.
+  - The store and the agent (mcp-online-store) see the same Order 360, because both use the same Process APIs.
+
+uses:
+  common: ../fragments/poc-common/poc-common.raml
+
+traits:
+  approver-only:
+    description: |
+      Only the approver client application can do it (D10). The API passes the caller's client_id as x-client-app.
+    responses:
+      403:
+        description: The caller is not the approver application.
+        body:
+          application/json:
+            type: ApiError
+            example:
+              code: FORBIDDEN
+              message: Only an approver can decide on a request
+              correlationId: 0b6f2f0e-4a0c-4d25-9a4c-3d9e6a7b1c2d
+              timestamp: 2026-11-20T12:00:00-06:00
+              retryable: false
+      404:
+        description: The request does not exist.
+        body:
+          application/json:
+            type: ApiError
+            example:
+              code: REQUEST_NOT_FOUND
+              message: The request does not exist
+              correlationId: 0b6f2f0e-4a0c-4d25-9a4c-3d9e6a7b1c2d
+              timestamp: 2026-11-20T12:00:00-06:00
+              retryable: false
+      409:
+        description: The request is not PENDING. Nothing was changed.
+        body:
+          application/json:
+            type: ApiError
+            example:
+              code: INVALID_TRANSITION
+              message: The request is COMPLETED; it cannot move from PENDING to APPROVED
+              correlationId: 0b6f2f0e-4a0c-4d25-9a4c-3d9e6a7b1c2d
+              timestamp: 2026-11-20T12:00:00-06:00
+              retryable: false
+
+types:
+  ApiError:
+    type: common.ErrorResponse
+    description: Error model of the API (common ErrorResponse), named locally so the approver-only trait resolves it.
+  Product:
+    description: A catalog product. Never quoted live.
+    type: object
+    properties:
+      itemId: common.Uuid
+      sku: string
+      name: string
+      stock:
+        type: integer
+        minimum: 0
+      price:
+        type: number
+        required: false
+        description: Missing when the product has neither a local price nor a last price of its preferred provider.
+      currency: common.Currency
+      priceSource:
+        type: string
+        enum: [LOCAL, LAST_PRICE]
+        required: false
+      provider:
+        type: common.ProviderAbv
+        required: false
+        description: Preferred provider, when the price is its last price.
+    example:
+      itemId: 20000000-0000-4000-8000-000000000100
+      sku: SKU-100
+      name: Producto 100
+      stock: 2
+      price: 189.00
+      currency: MXN
+      priceSource: LAST_PRICE
+      provider: FAK
+  NewOrder:
+    description: A new order of a registered customer (its Salesforce Id). There is no file name anymore.
+    type: object
+    properties:
+      customerId: common.SalesforceId
+      lines:
+        type: common.OrderLineRequest[]
+        minItems: 1
+        maxItems: 100
+    example:
+      customerId: 003Hs00000CUMBRAAA
+      lines:
+        - itemId: 20000000-0000-4000-8000-000000000200
+          quantity: 2
+  OrderReceipt:
+    description: The order registered as RECEIVED. The confirmation cycle prices and confirms it later.
+    type: object
+    properties:
+      orderId: common.Uuid
+      status: common.OrderStatus
+      createdAt: datetime
+    example:
+      orderId: 10000000-0000-4000-8000-000000001006
+      status: RECEIVED
+      createdAt: 2026-11-20T13:00:00-06:00
+  ProviderQuote:
+    description: A provider quote for the missing quantity.
+    type: object
+    properties:
+      provider: common.ProviderAbv
+      price: number
+      cheapest:
+        type: boolean
+        required: false
+    example:
+      provider: BOR
+      price: 175.00
+      cheapest: true
+  Alternatives:
+    description: |
+      How to resolve an order exception.
+      - RESTOCK (stock shortage): the missing quantity with the quotes of every provider and the cheapest one.
+      - REISSUE (rejected dispatch note): reissue the dispatch note with the next sequence number.
+    type: object
+    properties:
+      orderId: common.Uuid
+      type: common.RequestType
+      itemId:
+        type: common.Uuid
+        required: false
+      sku:
+        type: string
+        required: false
+      shortage:
+        type: integer
+        required: false
+        description: Units missing (RESTOCK).
+      currency:
+        type: common.Currency
+        required: false
+      quotes:
+        type: ProviderQuote[]
+        required: false
+      cheapest:
+        type: common.Alternative
+        required: false
+        description: The proposed correction (RESTOCK with the cheapest provider, or REISSUE).
+      reason:
+        type: string
+        required: false
+        description: Rejection reason of the dispatch note (REISSUE).
+      providers:
+        type: string
+        pattern: '^[0-9]+ of [0-9]+$'
+        required: false
+        description: How many providers returned a quote (RESTOCK).
+    example:
+      orderId: 10000000-0000-4000-8000-000000001002
+      type: RESTOCK
+      itemId: 20000000-0000-4000-8000-000000000100
+      sku: SKU-100
+      shortage: 3
+      currency: MXN
+      quotes:
+        - provider: FAK
+          price: 189.00
+        - provider: ESC
+          price: 194.00
+        - provider: BOR
+          price: 175.00
+          cheapest: true
+      cheapest:
+        type: RESTOCK
+        itemId: 20000000-0000-4000-8000-000000000100
+        sku: SKU-100
+        quantity: 3
+        provider: BOR
+        price: 175.00
+        currency: MXN
+        cheapest: true
+      providers: 3 of 3
+  NewOrderRequest:
+    description: |
+      A correction request on an order. RESTOCK needs itemId, quantity, provider and the quoted price (take them from
+      the alternatives); REISSUE needs nothing else.
+    type: object
+    properties:
+      orderId: common.Uuid
+      type: common.RequestType
+      detail:
+        type: object
+        required: false
+        properties:
+          itemId:
+            type: common.Uuid
+            required: false
+          quantity:
+            type: integer
+            minimum: 1
+            required: false
+          provider:
+            type: common.ProviderAbv
+            required: false
+          price:
+            type: number
+            minimum: 0
+            required: false
+          currency:
+            type: common.Currency
+            required: false
+    example:
+      orderId: 10000000-0000-4000-8000-000000001002
+      type: RESTOCK
+      detail:
+        itemId: 20000000-0000-4000-8000-000000000100
+        quantity: 3
+        provider: BOR
+        price: 175.00
+        currency: MXN
+  Rejection:
+    description: Why the approver rejects the request.
+    type: object
+    properties:
+      reason:
+        type: string
+        minLength: 1
+        maxLength: 500
+    example:
+      reason: The customer already accepted a partial delivery
+
+/products:
+  get:
+    displayName: Catalog
+    description: Products with stock and price (local price, or the last price of the preferred provider). Never quotes live.
+    is: [common.secured, common.validated, common.paged, common.retryable]
+    responses:
+      200:
+        description: A page of the catalog.
+        body:
+          application/json:
+            type: Product[]
+
+/customers:
+  get:
+    displayName: List customers
+    description: Customers in pages, to pick who buys. Paging protects the daily Salesforce API limit.
+    is: [common.secured, common.validated, common.paged, common.bad-gateway, common.retryable]
+    responses:
+      200:
+        description: A page of customers.
+        body:
+          application/json:
+            type: common.Customer[]
+            example:
+              - id: 003Hs00000CUMBRAAA
+                name: Constructora Cumbres
+                email: compras@cumbres.ejemplo.mx
+                phone: '+528181234567'
+                segment: STRATEGIC
+                address:
+                  street: Av. Constitución 100
+                  city: Monterrey
+                  postalCode: '64000'
+  post:
+    displayName: Register customer
+    description: |
+      Registers the customer in the CRM. Email or phone is required; without a segment it is REGULAR.
+      An email that already exists returns 409 CUSTOMER_ALREADY_EXISTS and nothing is created.
+    is: [common.secured, common.validated, common.bad-gateway, common.retryable]
+    body:
+      application/json:
+        type: common.CustomerRequest
+        example:
+          name: Mueblería Del Bajío
+          email: compras@delbajio.ejemplo.mx
+          phone: '+524771234567'
+          address:
+            street: Blvd. López Mateos 800
+            city: León
+            state: Guanajuato
+            postalCode: '37000'
+    responses:
+      201:
+        description: Customer registered with its Salesforce Id.
+        body:
+          application/json:
+            type: common.Customer
+      409:
+        description: A customer with the same email already exists. Nothing was created.
+        body:
+          application/json:
+            type: common.ErrorResponse
+            example:
+              code: CUSTOMER_ALREADY_EXISTS
+              message: A customer with this email already exists
+              correlationId: 0b6f2f0e-4a0c-4d25-9a4c-3d9e6a7b1c2d
+              timestamp: 2026-11-20T12:00:00-06:00
+              retryable: false
+
+  /{customerId}:
+    uriParameters:
+      customerId:
+        type: common.SalesforceId
+    get:
+      displayName: Get customer
+      description: A customer with its segment and delivery address.
+      is: [common.secured, common.bad-gateway, common.retryable]
+      responses:
+        200:
+          description: Customer found.
+          body:
+            application/json:
+              type: common.Customer
+        404:
+          description: The customer does not exist.
+          body:
+            application/json:
+              type: common.ErrorResponse
+              example:
+                code: CUSTOMER_NOT_FOUND
+                message: The customer does not exist
+                correlationId: 0b6f2f0e-4a0c-4d25-9a4c-3d9e6a7b1c2d
+                timestamp: 2026-11-20T12:00:00-06:00
+                retryable: false
+
+/orders:
+  get:
+    displayName: List orders
+    description: Orders by status and from a date, oldest first. For the store and its daily summary.
+    is: [common.secured, common.validated, common.paged, common.retryable]
+    queryParameters:
+      status:
+        type: common.OrderStatus
+        required: false
+      from:
+        type: datetime
+        required: false
+        description: Orders created at or after this moment.
+        example: 2026-11-18T00:00:00-06:00
+    responses:
+      200:
+        description: Orders found (the list may be empty).
+        body:
+          application/json:
+            type: common.Order[]
+  post:
+    displayName: Create order
+    description: |
+      Registers the order of a registered customer as RECEIVED and answers in less than 1 s. The confirmation cycle
+      prices and confirms it, drops its dispatch note and emails the customer.
+    is: [common.secured, common.validated, common.bad-gateway, common.retryable]
+    body:
+      application/json:
+        type: NewOrder
+    responses:
+      201:
+        description: Order registered as RECEIVED.
+        body:
+          application/json:
+            type: OrderReceipt
+
+  /exceptions:
+    get:
+      displayName: Orders at risk
+      description: |
+        Open orders with an exception (STOCK_SHORTAGE, UNCONFIRMED or DISPATCH_REJECTED), STRATEGIC customers first,
+        then the oldest orders. The same list the agent gets with list_exceptions.
+      is: [common.secured, common.validated, common.retryable]
+      queryParameters:
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 20
+          required: false
+      responses:
+        200:
+          description: Prioritized exceptions (the list may be empty).
+          body:
+            application/json:
+              type: common.OrderException[]
+              example:
+                - orderId: 10000000-0000-4000-8000-000000001002
+                  type: STOCK_SHORTAGE
+                  status: CONFIRMED
+                  customer:
+                    id: 003Hs00000CUMBRAAA
+                    name: Constructora Cumbres
+                    segment: STRATEGIC
+                    city: Monterrey
+                  createdAt: 2026-11-18T09:15:00-06:00
+                  detail: SKU-100 ordered 5, available 2
+
+  /{orderId}:
+    uriParameters:
+      orderId:
+        type: common.Uuid
+    get:
+      displayName: Order 360
+      description: |
+        The order composed from the systems when it is queried: status, customer and segment, lines with their
+        availability and the dispatch note status. A source that does not answer is flagged in `sources` and the
+        response still arrives within 3 s.
+      is: [common.secured, common.not-found, common.retryable]
+      responses:
+        200:
+          description: Order 360.
+          body:
+            application/json:
+              type: common.Order360
+
+    /alternatives:
+      get:
+        displayName: Alternatives
+        description: |
+          RESTOCK with the cheapest provider and the quotes of all of them, or REISSUE of a rejected dispatch note.
+          Answers within 3 s even when a provider is slow (it then shows "2 of 3").
+        is: [common.secured, common.not-found, common.retryable]
+        responses:
+          200:
+            description: Alternatives of the order exception.
+            body:
+              application/json:
+                type: Alternatives
+          409:
+            description: The order has no exception to resolve.
+            body:
+              application/json:
+                type: common.ErrorResponse
+                example:
+                  code: ORDER_WITHOUT_EXCEPTION
+                  message: The order has no stock shortage or rejected dispatch note
+                  correlationId: 0b6f2f0e-4a0c-4d25-9a4c-3d9e6a7b1c2d
+                  timestamp: 2026-11-20T12:00:00-06:00
+                  retryable: false
+
+/order-requests:
+  post:
+    displayName: Request a correction
+    description: |
+      Creates a request with a unique key and answers 202; nothing is applied until a person approves. Repeating the
+      Idempotency-Key returns the same request. The approver is told by email.
+    is: [common.secured, common.validated, common.retryable]
+    headers:
+      Idempotency-Key:
+        description: Unique key of the request, generated by the caller. Repeating it returns the first response.
+        type: string
+        minLength: 8
+        maxLength: 100
+        example: 7f3c2a10-9b4e-4c1d-8e2f-5a6b7c8d9e0f
+    body:
+      application/json:
+        type: NewOrderRequest
+    responses:
+      202:
+        description: Request accepted and waiting for a decision.
+        headers:
+          Location:
+            description: Address of the request.
+            type: string
+            example: /api/v1/online-store/order-requests/30000000-0000-4000-8000-000000000042
+        body:
+          application/json:
+            type: common.OrderRequest
+  get:
+    displayName: List requests by status
+    description: Requests in one status, newest first. The approval view lists the PENDING ones.
+    is: [common.secured, common.validated, common.paged, common.retryable]
+    queryParameters:
+      status:
+        type: common.RequestStatus
+        required: false
+    responses:
+      200:
+        description: Requests found (the list may be empty).
+        body:
+          application/json:
+            type: common.OrderRequest[]
+
+  /{requestId}:
+    uriParameters:
+      requestId:
+        type: common.Uuid
+    get:
+      displayName: Get request
+      description: Status of the request and the history of every step.
+      is: [common.secured, common.retryable]
+      responses:
+        200:
+          description: The request with its history.
+          body:
+            application/json:
+              type: common.OrderRequest
+        404:
+          description: The request does not exist.
+          body:
+            application/json:
+              type: common.ErrorResponse
+              example:
+                code: REQUEST_NOT_FOUND
+                message: The request does not exist
+                correlationId: 0b6f2f0e-4a0c-4d25-9a4c-3d9e6a7b1c2d
+                timestamp: 2026-11-20T12:00:00-06:00
+                retryable: false
+
+    /approve:
+      post:
+        displayName: Approve
+        description: |
+          The approver approves a PENDING request; papi-orders applies the correction once. It ends COMPLETED (the
+          customer is told by email) or FAILED.
+        is: [common.secured, approver-only, common.retryable]
+        responses:
+          200:
+            description: The request after the decision (COMPLETED or FAILED) with its history.
+            body:
+              application/json:
+                type: common.OrderRequest
+
+    /reject:
+      post:
+        displayName: Reject
+        description: The approver rejects a PENDING request with a reason. Nothing is applied.
+        is: [common.secured, common.validated, approver-only]
+        body:
+          application/json:
+            type: Rejection
+        responses:
+          200:
+            description: The request REJECTED with its history.
+            body:
+              application/json:
+                type: common.OrderRequest

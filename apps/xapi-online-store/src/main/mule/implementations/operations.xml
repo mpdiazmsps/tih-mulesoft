@@ -1,0 +1,163 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd">
+
+	<!-- The 14 operations of the store. Each one only names its Process API call (method, path and query) and forwards
+	     the answer as it is: status, body (contract type or common ErrorResponse) and Retry-After. No business logic. -->
+
+	<flow name="catalog-get-flow" doc:name="catalog-get-flow" doc:description="Products with stock and price: GET papi-orders">
+		<set-variable variableName="call" doc:name="set-call" doc:description="The Process API call of this operation"
+			value="#[output application/java --- { method: 'GET', path: '/products', query: attributes.queryParams }]"/>
+		<flow-ref name="papi-orders-call-subflow" doc:name="flow-ref-papi-orders-call" doc:description="Calls papi-orders and forwards its answer"/>
+	</flow>
+
+	<flow name="customers-list-flow" doc:name="customers-list-flow" doc:description="Customers in pages: GET papi-customers">
+		<set-variable variableName="call" doc:name="set-call" doc:description="The Process API call of this operation"
+			value="#[output application/java --- { method: 'GET', path: '/customers', query: attributes.queryParams }]"/>
+		<flow-ref name="papi-customers-call-subflow" doc:name="flow-ref-papi-customers-call" doc:description="Calls papi-customers and forwards its answer"/>
+	</flow>
+
+	<flow name="customers-register-flow" doc:name="customers-register-flow" doc:description="Registers the customer in the CRM: POST papi-customers">
+		<set-variable variableName="call" doc:name="set-call" doc:description="The Process API call of this operation"
+			value="#[output application/java --- { method: 'POST', path: '/customers' }]"/>
+		<flow-ref name="papi-customers-call-subflow" doc:name="flow-ref-papi-customers-call" doc:description="Calls papi-customers and forwards its answer"/>
+	</flow>
+
+	<flow name="customer-get-flow" doc:name="customer-get-flow" doc:description="A customer with its segment and address: GET papi-customers">
+		<set-variable variableName="call" doc:name="set-call" doc:description="The Process API call of this operation"
+			value="#[output application/java --- { method: 'GET', path: '/customers/' ++ attributes.uriParams.customerId }]"/>
+		<flow-ref name="papi-customers-call-subflow" doc:name="flow-ref-papi-customers-call" doc:description="Calls papi-customers and forwards its answer"/>
+	</flow>
+
+	<flow name="orders-list-flow" doc:name="orders-list-flow" doc:description="Orders by status and date: GET papi-orders">
+		<set-variable variableName="call" doc:name="set-call" doc:description="The Process API call of this operation"
+			value="#[output application/java --- { method: 'GET', path: '/orders', query: attributes.queryParams }]"/>
+		<flow-ref name="papi-orders-call-subflow" doc:name="flow-ref-papi-orders-call" doc:description="Calls papi-orders and forwards its answer"/>
+	</flow>
+
+	<flow name="orders-create-flow" doc:name="orders-create-flow" doc:description="Registers the order as RECEIVED: POST papi-orders">
+		<set-variable variableName="call" doc:name="set-call" doc:description="The Process API call of this operation"
+			value="#[output application/java --- { method: 'POST', path: '/orders' }]"/>
+		<flow-ref name="papi-orders-call-subflow" doc:name="flow-ref-papi-orders-call" doc:description="Calls papi-orders and forwards its answer"/>
+	</flow>
+
+	<flow name="orders-exceptions-flow" doc:name="orders-exceptions-flow" doc:description="Orders with an exception, prioritized by segment: GET papi-orders">
+		<set-variable variableName="call" doc:name="set-call" doc:description="The Process API call of this operation"
+			value="#[output application/java --- { method: 'GET', path: '/orders/exceptions', query: attributes.queryParams }]"/>
+		<flow-ref name="papi-orders-call-subflow" doc:name="flow-ref-papi-orders-call" doc:description="Calls papi-orders and forwards its answer"/>
+	</flow>
+
+	<flow name="order360-get-flow" doc:name="order360-get-flow" doc:description="The order composed from every system: GET papi-orders">
+		<set-variable variableName="call" doc:name="set-call" doc:description="The Process API call of this operation"
+			value="#[output application/java --- { method: 'GET', path: '/orders/' ++ attributes.uriParams.orderId }]"/>
+		<flow-ref name="papi-orders-call-subflow" doc:name="flow-ref-papi-orders-call" doc:description="Calls papi-orders and forwards its answer"/>
+	</flow>
+
+	<flow name="alternatives-get-flow" doc:name="alternatives-get-flow" doc:description="Quoted alternatives of the order exception: GET papi-orders">
+		<set-variable variableName="call" doc:name="set-call" doc:description="The Process API call of this operation"
+			value="#[output application/java --- { method: 'GET', path: '/orders/' ++ attributes.uriParams.orderId ++ '/alternatives' }]"/>
+		<flow-ref name="papi-orders-call-subflow" doc:name="flow-ref-papi-orders-call" doc:description="Calls papi-orders and forwards its answer"/>
+	</flow>
+
+	<flow name="requests-create-flow" doc:name="requests-create-flow" doc:description="Creates a correction request (202): POST papi-order-requests">
+		<set-variable variableName="call" doc:name="set-call" doc:description="The Process API call of this operation"
+			value="#[output application/java --- { method: 'POST', path: '/order-requests' }]"/>
+		<flow-ref name="papi-order-requests-call-subflow" doc:name="flow-ref-papi-order-requests-call" doc:description="Calls papi-order-requests and forwards its answer"/>
+	</flow>
+
+	<flow name="requests-list-flow" doc:name="requests-list-flow" doc:description="Requests in one status: GET papi-order-requests">
+		<set-variable variableName="call" doc:name="set-call" doc:description="The Process API call of this operation"
+			value="#[output application/java --- { method: 'GET', path: '/order-requests', query: attributes.queryParams }]"/>
+		<flow-ref name="papi-order-requests-call-subflow" doc:name="flow-ref-papi-order-requests-call" doc:description="Calls papi-order-requests and forwards its answer"/>
+	</flow>
+
+	<flow name="request-get-flow" doc:name="request-get-flow" doc:description="Status and history of a request: GET papi-order-requests">
+		<set-variable variableName="call" doc:name="set-call" doc:description="The Process API call of this operation"
+			value="#[output application/java --- { method: 'GET', path: '/order-requests/' ++ attributes.uriParams.requestId }]"/>
+		<flow-ref name="papi-order-requests-call-subflow" doc:name="flow-ref-papi-order-requests-call" doc:description="Calls papi-order-requests and forwards its answer"/>
+	</flow>
+
+	<flow name="request-approve-flow" doc:name="request-approve-flow" doc:description="The approver approves (D10): POST papi-order-requests">
+		<set-variable variableName="call" doc:name="set-call" doc:description="The Process API call of this operation"
+			value="#[output application/java --- { method: 'POST', path: '/order-requests/' ++ attributes.uriParams.requestId ++ '/approve' }]"/>
+		<flow-ref name="papi-order-requests-call-subflow" doc:name="flow-ref-papi-order-requests-call" doc:description="Calls papi-order-requests and forwards its answer"/>
+	</flow>
+
+	<flow name="request-reject-flow" doc:name="request-reject-flow" doc:description="The approver rejects (D10): POST papi-order-requests">
+		<set-variable variableName="call" doc:name="set-call" doc:description="The Process API call of this operation"
+			value="#[output application/java --- { method: 'POST', path: '/order-requests/' ++ attributes.uriParams.requestId ++ '/reject' }]"/>
+		<flow-ref name="papi-order-requests-call-subflow" doc:name="flow-ref-papi-order-requests-call" doc:description="Calls papi-order-requests and forwards its answer"/>
+	</flow>
+
+	<sub-flow name="papi-customers-call-subflow" doc:name="papi-customers-call-subflow"
+		doc:description="Calls papi-customers with vars.call and forwards its answer as it is">
+		<flow-ref name="papi-request-prepare-subflow" doc:name="flow-ref-papi-request-prepare" doc:description="Headers propagated to the Process API"/>
+		<http:request method="#[vars.call.method]" config-ref="papi-customers-http-config" path="#[vars.call.path]"
+			doc:name="http-request-papi-customers" doc:description="Any status is accepted: the answer is forwarded to the consumer">
+			<http:headers>#[vars.papiHeaders]</http:headers>
+			<http:query-params>#[vars.call.query default {}]</http:query-params>
+			<http:response-validator>
+				<http:success-status-code-validator values="0..599"/>
+			</http:response-validator>
+		</http:request>
+		<flow-ref name="papi-response-forward-subflow" doc:name="flow-ref-papi-response-forward" doc:description="Same status, body and Retry-After"/>
+	</sub-flow>
+
+	<sub-flow name="papi-orders-call-subflow" doc:name="papi-orders-call-subflow"
+		doc:description="Calls papi-orders with vars.call and forwards its answer as it is">
+		<flow-ref name="papi-request-prepare-subflow" doc:name="flow-ref-papi-request-prepare" doc:description="Headers propagated to the Process API"/>
+		<http:request method="#[vars.call.method]" config-ref="papi-orders-http-config" path="#[vars.call.path]"
+			doc:name="http-request-papi-orders" doc:description="Any status is accepted: the answer is forwarded to the consumer">
+			<http:headers>#[vars.papiHeaders]</http:headers>
+			<http:query-params>#[vars.call.query default {}]</http:query-params>
+			<http:response-validator>
+				<http:success-status-code-validator values="0..599"/>
+			</http:response-validator>
+		</http:request>
+		<flow-ref name="papi-response-forward-subflow" doc:name="flow-ref-papi-response-forward" doc:description="Same status, body and Retry-After"/>
+	</sub-flow>
+
+	<sub-flow name="papi-order-requests-call-subflow" doc:name="papi-order-requests-call-subflow"
+		doc:description="Calls papi-order-requests with vars.call and forwards its answer as it is">
+		<flow-ref name="papi-request-prepare-subflow" doc:name="flow-ref-papi-request-prepare" doc:description="Headers propagated to the Process API"/>
+		<http:request method="#[vars.call.method]" config-ref="papi-order-requests-http-config" path="#[vars.call.path]"
+			doc:name="http-request-papi-order-requests" doc:description="Any status is accepted: the answer is forwarded to the consumer">
+			<http:headers>#[vars.papiHeaders]</http:headers>
+			<http:query-params>#[vars.call.query default {}]</http:query-params>
+			<http:response-validator>
+				<http:success-status-code-validator values="0..599"/>
+			</http:response-validator>
+		</http:request>
+		<flow-ref name="papi-response-forward-subflow" doc:name="flow-ref-papi-response-forward" doc:description="Same status, body and Retry-After"/>
+	</sub-flow>
+
+	<sub-flow name="papi-request-prepare-subflow" doc:name="papi-request-prepare-subflow"
+		doc:description="Headers for the Process API: x-correlation-id, x-client-app (the caller's client_id, D10) and Idempotency-Key">
+		<set-variable variableName="papiHeaders" doc:name="set-papi-headers" doc:description="The caller's client_id travels as x-client-app"
+			value="#[output application/java --- {
+	'x-correlation-id': correlationId,
+	'x-client-app': attributes.headers.client_id default 'unknown-client',
+	('Idempotency-Key': attributes.headers.'idempotency-key') if (attributes.headers.'idempotency-key' != null)
+}]"/>
+		<logger level="INFO" message="#[output application/java --- 'INIT - ' ++ vars.call.method ++ ' ' ++ vars.call.path ++ ' for ' ++ vars.papiHeaders.'x-client-app' ++ ' correlationId: ' ++ correlationId]"
+			doc:name="logger-papi-call" doc:description="Logs the operation and the calling application"/>
+	</sub-flow>
+
+	<sub-flow name="papi-response-forward-subflow" doc:name="papi-response-forward-subflow"
+		doc:description="Forwards the Process API status and Retry-After; the request Location points to this API">
+		<set-variable variableName="httpStatus" value="#[attributes.statusCode]" doc:name="set-http-status" doc:description="Same status the Process API returned"/>
+		<set-variable variableName="outboundHeaders" doc:name="set-outbound-headers" doc:description="Retry-After when the Process API sent it; Location of a new request"
+			value="#[output application/java --- {
+	('Retry-After': attributes.headers.'retry-after') if (attributes.headers.'retry-after' != null),
+	(Location: p('http.listener.basePath') ++ '/order-requests/' ++ payload.requestId) if (attributes.statusCode == 202 and payload.requestId != null)
+}]"/>
+		<logger level="INFO" message="#[output application/java --- 'END - ' ++ vars.call.method ++ ' ' ++ vars.call.path ++ ' status: ' ++ (vars.httpStatus as String) ++ ' correlationId: ' ++ correlationId]"
+			doc:name="logger-papi-answer" doc:description="Logs the forwarded status"/>
+	</sub-flow>
+
+</mule>

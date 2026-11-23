@@ -1,0 +1,34 @@
+# Configuration for CloudHub 2.0 (env=cloud). Marker values: they are filled in task 26 with the real endpoints.
+http:
+  listener:
+    host: "0.0.0.0"
+    port: "8081"
+    basePath: "/api/v1/online-store"
+
+papi:
+  customers:
+    protocol: "HTTPS"
+    host: "papi-customers-CHANGE_ME.usa-e1.cloudhub.io"
+    port: "443"
+    basePath: "/api/v1/customers-management"
+  orders:
+    protocol: "HTTPS"
+    host: "papi-orders-CHANGE_ME.usa-e1.cloudhub.io"
+    port: "443"
+    basePath: "/api/v1/orders-management"
+  orderRequests:
+    protocol: "HTTPS"
+    host: "papi-order-requests-CHANGE_ME.usa-e1.cloudhub.io"
+    port: "443"
+    basePath: "/api/v1"
+  timeoutMillis: "15000"
+  clientId: "CHANGE_ME"
+  clientSecret: "CHANGE_ME"
+
+# API Manager instance of xapi-online-store (Client ID Enforcement). Set it when the instance is created.
+api:
+  autodiscovery:
+    id: "CHANGE_ME"
+
+error:
+  retryAfterSeconds: "30"
