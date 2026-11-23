@@ -1,0 +1,187 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:sftp="http://www.mulesoft.org/schema/mule/sftp"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+		http://www.mulesoft.org/schema/mule/sftp http://www.mulesoft.org/schema/mule/sftp/current/mule-sftp.xsd">
+
+	<!-- Dispatch notes. The three operations go through poc-resilience with the source sftp: with the circuit open
+	     they answer 503 right away. The status is the folder (pendientes, firmadas, rechazadas). -->
+
+	<!-- ================================================================ POST /dispatch-notes -->
+	<flow name="dispatch-notes-post-flow" doc:name="dispatch-notes-post-flow"
+		doc:description="Drops remision_orderId_n.csv into pendientes with the order's next sequence number and returns 201">
+		<set-variable variableName="dispatchRequest" value="#[output application/java --- payload]"
+			doc:name="set-dispatch-request" doc:description="Keeps the request: SFTP operations replace the payload"/>
+		<logger level="INFO" message="#[output application/java --- 'INIT - Drop dispatch note, orderId: ' ++ vars.dispatchRequest.orderId ++ ' correlationId: ' ++ correlationId]"
+			doc:name="logger-drop-start" doc:description="Logs the start of the drop with the order id"/>
+		<set-variable variableName="rsFlow" value="dispatch-notes-write-subflow"
+			doc:name="set-rs-flow" doc:description="Read the order's notes, then write the next one"/>
+		<flow-ref name="sftp-resilient-call-subflow" doc:name="flow-ref-sftp-resilient-call"
+			doc:description="Calls the SFTP through poc-resilience; raises SFTP_UNAVAILABLE when it fails or the circuit is open"/>
+		<set-payload value="#[output application/json --- vars.rsResult.payload]"
+			doc:name="set-payload-dispatch-note" doc:description="The dispatch note just dropped"/>
+		<set-variable variableName="httpStatus" value="#[201]" doc:name="set-http-status-201" doc:description="Dispatch note dropped"/>
+		<logger level="INFO" message="#[output application/java --- 'END - Drop dispatch note, file: ' ++ payload.fileName ++ ' correlationId: ' ++ correlationId]"
+			doc:name="logger-drop-end" doc:description="Logs the name of the file dropped"/>
+	</flow>
+
+	<!-- ================================================================= GET /dispatch-notes -->
+	<flow name="dispatch-notes-list-flow" doc:name="dispatch-notes-list-flow"
+		doc:description="Dispatch notes in one folder (PENDING, SIGNED or REJECTED) with their acknowledgment">
+		<set-variable variableName="scanStatuses" value="#[output application/java --- [attributes.queryParams.status]]"
+			doc:name="set-scan-statuses" doc:description="Only the requested folder"/>
+		<set-variable variableName="scanOrderId" value="#[output application/java --- null]"
+			doc:name="set-scan-order-id" doc:description="Every order"/>
+		<set-variable variableName="rsFlow" value="dispatch-notes-scan-subflow"
+			doc:name="set-rs-flow" doc:description="Read flow of the SFTP"/>
+		<flow-ref name="sftp-resilient-call-subflow" doc:name="flow-ref-sftp-resilient-call"
+			doc:description="Calls the SFTP through poc-resilience; raises SFTP_UNAVAILABLE when it fails or the circuit is open"/>
+		<set-payload value="#[output application/json --- vars.rsResult.payload]"
+			doc:name="set-payload-dispatch-notes" doc:description="Dispatch notes of the folder (may be empty)"/>
+	</flow>
+
+	<!-- ======================================================== GET /dispatch-notes/{orderId} -->
+	<flow name="dispatch-notes-get-flow" doc:name="dispatch-notes-get-flow"
+		doc:description="The order's dispatch note with the highest sequence number, in any folder; 404 when it has none">
+		<set-variable variableName="scanStatuses" value="#[output application/java --- ['PENDING', 'SIGNED', 'REJECTED']]"
+			doc:name="set-scan-statuses" doc:description="The three folders"/>
+		<set-variable variableName="scanOrderId" value="#[output application/java --- attributes.uriParams.orderId]"
+			doc:name="set-scan-order-id" doc:description="Order id taken from the path"/>
+		<set-variable variableName="rsFlow" value="dispatch-notes-scan-subflow"
+			doc:name="set-rs-flow" doc:description="Read flow of the SFTP"/>
+		<flow-ref name="sftp-resilient-call-subflow" doc:name="flow-ref-sftp-resilient-call"
+			doc:description="Calls the SFTP through poc-resilience; raises SFTP_UNAVAILABLE when it fails or the circuit is open"/>
+		<choice doc:name="choice-has-dispatch-note" doc:description="404 when the order has no dispatch note (papi-orders reads it as ON_HOLD)">
+			<when expression="#[isEmpty(vars.rsResult.payload)]" doc:name="when-no-dispatch-note" doc:description="No file of the order in any folder">
+				<raise-error type="APP:DISPATCH_NOTE_NOT_FOUND" description="The order has no dispatch note"
+					doc:name="raise-dispatch-note-not-found" doc:description="Returns 404"/>
+			</when>
+		</choice>
+		<set-payload value="#[output application/json --- (vars.rsResult.payload orderBy ((n) -> n.sequence))[-1]]"
+			doc:name="set-payload-latest-dispatch-note" doc:description="The dispatch note with the highest sequence number"/>
+	</flow>
+
+	<!-- ===================================================== Resilient call to the SFTP -->
+	<sub-flow name="sftp-resilient-call-subflow" doc:name="sftp-resilient-call-subflow"
+		doc:description="Runs vars.rsFlow through resilience-call with the source sftp; raises APP:SFTP_UNAVAILABLE when it fails">
+		<set-variable variableName="rsSource" value="sftp" doc:name="set-rs-source" doc:description="Resilience source of the SFTP"/>
+		<flow-ref name="resilience-call" doc:name="flow-ref-resilience-call"
+			doc:description="Circuit breaker and one retry on connectivity; never raises, leaves vars.rsResult"/>
+		<choice doc:name="choice-sftp-available" doc:description="Any SFTP failure, including an open circuit, is a retryable 503">
+			<when expression="#[not vars.rsResult.ok]" doc:name="when-sftp-unavailable" doc:description="The SFTP failed or its circuit is open">
+				<logger level="WARN" message="#[output application/java --- 'WARN - SFTP call failed, reason: ' ++ (vars.rsResult.reason default '') ++ ' - ' ++ (vars.rsResult.message default '') ++ ' correlationId: ' ++ correlationId]"
+					doc:name="logger-sftp-failure" doc:description="Logs the failure reason and detail (the consumer only gets the reason)"/>
+				<raise-error type="APP:SFTP_UNAVAILABLE" description="#[output application/java --- 'The logistics SFTP is unavailable (' ++ (vars.rsResult.reason default 'UNKNOWN') ++ ')']"
+					doc:name="raise-sftp-unavailable" doc:description="Returns a retryable 503 with Retry-After"/>
+			</when>
+		</choice>
+	</sub-flow>
+
+	<!-- ================================================================= SFTP read and write flows -->
+	<sub-flow name="dispatch-notes-scan-subflow" doc:name="dispatch-notes-scan-subflow"
+		doc:description="Lists the folders in vars.scanStatuses and returns their dispatch notes (of vars.scanOrderId, or all)">
+		<set-variable variableName="scanEntries" value="#[output application/java --- []]"
+			doc:name="set-scan-entries" doc:description="Files found so far"/>
+		<foreach collection="#[vars.scanStatuses]" doc:name="foreach-folder" doc:description="One listing per folder">
+			<set-variable variableName="scanStatus" value="#[output application/java --- payload]"
+				doc:name="set-scan-status" doc:description="Status of the folder being listed"/>
+			<sftp:list config-ref="sftp-logistics-config"
+				directoryPath="#[output application/java --- p('sftp.baseDir') ++ '/' ++ (if (vars.scanStatus == 'PENDING') p('sftp.folders.pending') else if (vars.scanStatus == 'SIGNED') p('sftp.folders.signed') else p('sftp.folders.rejected'))]"
+				doc:name="sftp-list-folder" doc:description="Files of one logistics folder"/>
+			<ee:transform doc:name="transform-collect-entries" doc:description="Keeps the order's CSVs and acknowledgments of this folder">
+				<ee:message/>
+				<ee:variables>
+					<ee:set-variable variableName="scanEntries"><![CDATA[%dw 2.0
+import folderEntries from modules::dispatch
+output application/java
+---
+vars.scanEntries ++ folderEntries(payload, vars.scanStatus, vars.scanOrderId)]]></ee:set-variable>
+				</ee:variables>
+			</ee:transform>
+		</foreach>
+		<set-variable variableName="scanAcks" value="#[output application/java --- {}]"
+			doc:name="set-scan-acks" doc:description="Acknowledgment content by file name"/>
+		<foreach collection="#[output application/java --- vars.scanEntries filter ((e) -> e.name endsWith '.acuse.json')]"
+			doc:name="foreach-acknowledgment" doc:description="sftp:list only returns paths: each acknowledgment is read">
+			<set-variable variableName="ackName" value="#[output application/java --- payload.name]"
+				doc:name="set-ack-name" doc:description="Name of the acknowledgment being read"/>
+			<sftp:read config-ref="sftp-logistics-config" path="#[output application/java --- payload.path]" outputMimeType="application/json"
+				doc:name="sftp-read-acknowledgment" doc:description="Reads the acknowledgment logistics left next to the CSV"/>
+			<set-variable variableName="scanAcks" value="#[output application/java --- vars.scanAcks ++ { (vars.ackName): payload }]"
+				doc:name="set-scan-acks-add" doc:description="Adds the acknowledgment content"/>
+		</foreach>
+		<ee:transform doc:name="transform-dispatch-notes" doc:description="One DispatchNote per CSV, joined with its acknowledgment">
+			<ee:message>
+				<ee:set-payload><![CDATA[%dw 2.0
+import toNotes from modules::dispatch
+output application/java
+---
+toNotes(vars.scanEntries, vars.scanAcks)]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+	</sub-flow>
+
+	<sub-flow name="dispatch-notes-write-subflow" doc:name="dispatch-notes-write-subflow"
+		doc:description="Finds the order's next sequence number, writes the CSV as .tmp and renames it (never overwrites)">
+		<set-variable variableName="scanStatuses" value="#[output application/java --- ['PENDING', 'SIGNED', 'REJECTED']]"
+			doc:name="set-scan-statuses" doc:description="The sequence counts the order's notes in the three folders"/>
+		<set-variable variableName="scanOrderId" value="#[output application/java --- vars.dispatchRequest.orderId]"
+			doc:name="set-scan-order-id" doc:description="Only the notes of this order"/>
+		<flow-ref name="dispatch-notes-scan-subflow" doc:name="flow-ref-scan-order-notes"
+			doc:description="Existing dispatch notes of the order"/>
+		<ee:transform doc:name="transform-new-dispatch-note" doc:description="Next sequence number, file name and dispatch note to return">
+			<ee:message/>
+			<ee:variables>
+				<ee:set-variable variableName="newNote"><![CDATA[%dw 2.0
+import nextSequence from modules::dispatch
+output application/java
+var n = nextSequence(payload)
+var orderId = vars.dispatchRequest.orderId
+---
+{
+	dispatchNoteId: orderId ++ "-" ++ n,
+	orderId: orderId,
+	sequence: n,
+	fileName: "remision_" ++ orderId ++ "_" ++ n ++ ".csv",
+	status: "PENDING",
+	depositedAt: (now() >> "UTC") as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
+}]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+		<ee:transform doc:name="transform-dispatch-note-csv" doc:description="The CSV logistics reads: one row per line with order, note, customer and address">
+			<ee:message>
+				<ee:set-payload><![CDATA[%dw 2.0
+output application/csv header=true, encoding="UTF-8"
+var r = vars.dispatchRequest
+var a = r.customer.address
+---
+r.lines map ((l) -> {
+	pedido: r.orderId,
+	remision: vars.newNote.dispatchNoteId,
+	cliente: r.customer.name,
+	calle: a.street default "",
+	ciudad: a.city,
+	estado: a.state default "",
+	codigo_postal: a.postalCode default "",
+	sku: l.sku,
+	cantidad: l.quantity
+})]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<set-variable variableName="pendingDir" value="#[output application/java --- p('sftp.baseDir') ++ '/' ++ p('sftp.folders.pending')]"
+			doc:name="set-pending-dir" doc:description="Folder logistics watches"/>
+		<sftp:write config-ref="sftp-logistics-config" path="#[output application/java --- vars.pendingDir ++ '/' ++ vars.newNote.fileName ++ '.tmp']" mode="OVERWRITE"
+			doc:name="sftp-write-temporary-file" doc:description="Writes the CSV as .tmp: logistics ignores it until it is renamed"/>
+		<sftp:rename config-ref="sftp-logistics-config" path="#[output application/java --- vars.pendingDir ++ '/' ++ vars.newNote.fileName ++ '.tmp']"
+			to="#[output application/java --- vars.newNote.fileName]" overwrite="false"
+			doc:name="sftp-rename-to-final-name" doc:description="Gives the file its final name; never overwrites an existing dispatch note"/>
+		<set-payload value="#[output application/java --- vars.newNote]"
+			doc:name="set-payload-new-note" doc:description="The dispatch note just dropped"/>
+	</sub-flow>
+
+</mule>

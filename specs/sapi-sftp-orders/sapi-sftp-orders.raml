@@ -1,0 +1,82 @@
+#%RAML 1.0
+title: sapi-sftp-orders
+version: v1
+baseUri: https://{host}/api/{version}/sftp/orders
+baseUriParameters:
+  host:
+    description: Public CloudHub 2.0 endpoint of the sapi-sftp-orders application.
+    type: string
+    example: sapi-sftp-orders-a1b2c3.usa-e1.cloudhub.io
+protocols: [HTTPS]
+mediaType: application/json
+description: |
+  The gateway to logistics over SFTP. It drops each order's dispatch note and reads what the operator returns.
+  - The status is the folder: pending, signed or rejected (/despachos/pendientes, /firmadas, /rechazadas).
+  - Each dispatch note is remision_<orderId>_<n>.csv. Reissuing creates the next sequence number; it never overwrites.
+  - The acknowledgment (<file>.acuse.json) carries who received it and when, or the rejection reason.
+  - Safe writes (a .tmp file that is renamed), key authentication, 3 s timeout and circuit breaker from the
+    resilience library: with the SFTP down, after 3 failures it returns 503 without waiting.
+
+uses:
+  common: ../fragments/poc-common/poc-common.raml
+
+/dispatch-notes:
+  post:
+    displayName: Drop dispatch note
+    description: Drops the dispatch note into the pending folder with the order's next sequence number.
+    is: [common.secured, common.validated, common.retryable]
+    body:
+      application/json:
+        type: common.DispatchNoteRequest
+    responses:
+      201:
+        description: Dispatch note dropped.
+        body:
+          application/json:
+            type: common.DispatchNote
+            example:
+              dispatchNoteId: 10000000-0000-4000-8000-000000001004-2
+              orderId: 10000000-0000-4000-8000-000000001004
+              sequence: 2
+              fileName: remision_10000000-0000-4000-8000-000000001004_2.csv
+              status: PENDING
+              depositedAt: 2026-11-20T13:00:00-06:00
+  get:
+    displayName: List dispatch notes by status
+    description: Dispatch notes in one logistics folder, with their acknowledgment when there is one.
+    is: [common.secured, common.validated, common.retryable]
+    queryParameters:
+      status:
+        description: Folder where the dispatch notes are.
+        type: string
+        enum: [PENDING, SIGNED, REJECTED]
+    responses:
+      200:
+        description: Dispatch notes in that folder (the list may be empty).
+        body:
+          application/json:
+            type: common.DispatchNote[]
+            example:
+              - dispatchNoteId: 10000000-0000-4000-8000-000000001003-1
+                orderId: 10000000-0000-4000-8000-000000001003
+                sequence: 1
+                fileName: remision_10000000-0000-4000-8000-000000001003_1.csv
+                status: SIGNED
+                depositedAt: 2026-11-19T11:00:00-06:00
+                receivedBy: Jorge Treviño
+                acknowledgedAt: 2026-11-19T17:45:00-06:00
+
+  /{orderId}:
+    uriParameters:
+      orderId:
+        type: common.Uuid
+    get:
+      displayName: Get the order's latest dispatch note
+      description: Status and acknowledgment of the dispatch note with the highest sequence number. 404 when the order has none.
+      is: [common.secured, common.not-found, common.retryable]
+      responses:
+        200:
+          description: The order's latest dispatch note.
+          body:
+            application/json:
+              type: common.DispatchNote

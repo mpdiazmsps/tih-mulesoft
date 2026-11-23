@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:apikit="http://www.mulesoft.org/schema/mule/mule-apikit"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+		http://www.mulesoft.org/schema/mule/mule-apikit http://www.mulesoft.org/schema/mule/mule-apikit/current/mule-apikit.xsd">
+
+	<apikit:config name="sapi-sftp-orders-config"
+		api="resource::9885f017-0660-4c80-a27f-eb006d124bd8:sapi-sftp-orders:1.0.1:raml:zip:sapi-sftp-orders.raml"
+		outboundHeadersMapName="outboundHeaders"
+		httpStatusVarName="httpStatus"
+		doc:name="APIkit Router config"
+		doc:description="Validates each request against the sapi-sftp-orders RAML and routes it to its interface flow"/>
+
+	<flow name="sapi-sftp-orders-main"
+		doc:name="sapi-sftp-orders-main"
+		doc:description="HTTP entry point. Errors are handled by the global error handler">
+		<http:listener config-ref="sapi-sftp-orders-httpListenerConfig" path="${http.listener.basePath}/*"
+			doc:name="Listener"
+			doc:description="Receives requests on the API base path">
+			<http:response statusCode="#[vars.httpStatus default 200]">
+				<http:headers>#[vars.outboundHeaders default {}]</http:headers>
+			</http:response>
+			<http:error-response statusCode="#[vars.httpStatus default 500]">
+				<http:body>#[payload]</http:body>
+				<http:headers>#[vars.outboundHeaders default {}]</http:headers>
+			</http:error-response>
+		</http:listener>
+		<apikit:router config-ref="sapi-sftp-orders-config"
+			doc:name="APIkit Router"
+			doc:description="Routes the request to the interface flow matching the RAML method and resource"/>
+	</flow>
+
+	<!-- Interface flows with the APIkit scaffolding names: they only delegate to the implementation. Do not rename. -->
+
+	<flow name="post:\dispatch-notes:application\json:sapi-sftp-orders-config"
+		doc:name="post:\dispatch-notes"
+		doc:description="Drop a dispatch note into the pending folder">
+		<flow-ref name="dispatch-notes-post-flow" doc:name="dispatch-notes-post-flow"
+			doc:description="Delegates to the dispatch note drop"/>
+	</flow>
+
+	<flow name="get:\dispatch-notes:sapi-sftp-orders-config"
+		doc:name="get:\dispatch-notes"
+		doc:description="List dispatch notes by status">
+		<flow-ref name="dispatch-notes-list-flow" doc:name="dispatch-notes-list-flow"
+			doc:description="Delegates to the listing by folder"/>
+	</flow>
+
+	<flow name="get:\dispatch-notes\(orderId):sapi-sftp-orders-config"
+		doc:name="get:\dispatch-notes\(orderId)"
+		doc:description="Get the order's latest dispatch note">
+		<flow-ref name="dispatch-notes-get-flow" doc:name="dispatch-notes-get-flow"
+			doc:description="Delegates to the latest dispatch note lookup"/>
+	</flow>
+
+</mule>

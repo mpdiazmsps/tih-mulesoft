@@ -1,0 +1,213 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:os="http://www.mulesoft.org/schema/mule/os"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:munit="http://www.mulesoft.org/schema/mule/munit"
+	xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/os http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd
+		http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+		http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+		http://www.mulesoft.org/schema/mule/munit http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+		http://www.mulesoft.org/schema/mule/munit-tools http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd">
+
+	<!-- End-to-end HTTP tests: real listener (8092), APIkit with the Exchange contract, interface flows,
+	     global error handler and response codes. The SFTP is mocked. -->
+	<munit:config name="sapi-sftp-orders-main-test.xml"/>
+
+	<!-- MUnit initializes lazily: APIkit needs the interface flows and resilience-call needs the SFTP flows. -->
+	<munit:before-suite name="sapi-sftp-orders-main-warm-up">
+		<choice>
+			<when expression="#[false]">
+				<flow-ref name="post:\dispatch-notes:application\json:sapi-sftp-orders-config"/>
+				<flow-ref name="get:\dispatch-notes:sapi-sftp-orders-config"/>
+				<flow-ref name="get:\dispatch-notes\(orderId):sapi-sftp-orders-config"/>
+				<flow-ref name="dispatch-notes-scan-subflow"/>
+				<flow-ref name="dispatch-notes-write-subflow"/>
+			</when>
+		</choice>
+	</munit:before-suite>
+
+	<http:request-config name="test-api-client" doc:name="HTTP Request configuration">
+		<http:request-connection host="localhost" port="8092"/>
+	</http:request-config>
+
+	<!-- Every test starts with the sftp circuit closed: failures of one test must not leak into the next. -->
+	<munit:before-test name="sapi-sftp-orders-main-reset-circuit" description="Closes the sftp circuit before each test">
+		<try>
+			<os:remove key="sftp" objectStore="rs-circuit-store"/>
+			<error-handler>
+				<on-error-continue type="ANY" logException="false"/>
+			</error-handler>
+		</try>
+	</munit:before-test>
+
+	<!-- Mocked sftp:list for the HTTP suite: the seed folders (PED-1003 signed, PED-1004 rejected), nothing pending -->
+	<flow name="api-mock-sftp-list-flow">
+		<set-payload value="#[output application/java --- if (vars.scanStatus == 'SIGNED') [ { attributes: { fileName: 'remision_10000000-0000-4000-8000-000000001003_1.csv', path: '/despachos/carpeta/remision_10000000-0000-4000-8000-000000001003_1.csv', timestamp: |2026-11-18T18:05:00| }, payload: '' }, { attributes: { fileName: 'remision_10000000-0000-4000-8000-000000001003_1.csv.acuse.json', path: '/despachos/firmadas/remision_10000000-0000-4000-8000-000000001003_1.csv.acuse.json', timestamp: |2026-11-19T16:15:00| }, payload: write({ remision: '10000000-0000-4000-8000-000000001003-1', archivo: 'remision_10000000-0000-4000-8000-000000001003_1.csv', estado: 'FIRMADA', depositada: '2026-11-18T12:05:00-06:00', recibio: 'Jorge Treviño', fecha: '2026-11-19T10:15:00-06:00' }, 'application/json') } ] else if (vars.scanStatus == 'REJECTED') [ { attributes: { fileName: 'remision_10000000-0000-4000-8000-000000001004_1.csv', path: '/despachos/carpeta/remision_10000000-0000-4000-8000-000000001004_1.csv', timestamp: |2026-11-18T21:50:00| }, payload: '' }, { attributes: { fileName: 'remision_10000000-0000-4000-8000-000000001004_1.csv.acuse.json', path: '/despachos/rechazadas/remision_10000000-0000-4000-8000-000000001004_1.csv.acuse.json', timestamp: |2026-11-19T15:30:00| }, payload: write({ remision: '10000000-0000-4000-8000-000000001004-1', archivo: 'remision_10000000-0000-4000-8000-000000001004_1.csv', estado: 'RECHAZADA', depositada: '2026-11-18T15:50:00-06:00', motivo: 'Dirección incorrecta', fecha: '2026-11-19T09:30:00-06:00' }, 'application/json') } ] else []]"/>
+	</flow>
+
+	<!-- Mocked sftp:read for the HTTP suite: the acknowledgment of the seed entry with that name -->
+	<flow name="api-mock-sftp-read-flow">
+		<set-payload value="#[output application/java --- read(([ { attributes: { fileName: 'remision_10000000-0000-4000-8000-000000001003_1.csv', path: '/despachos/carpeta/remision_10000000-0000-4000-8000-000000001003_1.csv', timestamp: |2026-11-18T18:05:00| }, payload: '' }, { attributes: { fileName: 'remision_10000000-0000-4000-8000-000000001003_1.csv.acuse.json', path: '/despachos/firmadas/remision_10000000-0000-4000-8000-000000001003_1.csv.acuse.json', timestamp: |2026-11-19T16:15:00| }, payload: write({ remision: '10000000-0000-4000-8000-000000001003-1', archivo: 'remision_10000000-0000-4000-8000-000000001003_1.csv', estado: 'FIRMADA', depositada: '2026-11-18T12:05:00-06:00', recibio: 'Jorge Treviño', fecha: '2026-11-19T10:15:00-06:00' }, 'application/json') } ] ++ [ { attributes: { fileName: 'remision_10000000-0000-4000-8000-000000001004_1.csv', path: '/despachos/carpeta/remision_10000000-0000-4000-8000-000000001004_1.csv', timestamp: |2026-11-18T21:50:00| }, payload: '' }, { attributes: { fileName: 'remision_10000000-0000-4000-8000-000000001004_1.csv.acuse.json', path: '/despachos/rechazadas/remision_10000000-0000-4000-8000-000000001004_1.csv.acuse.json', timestamp: |2026-11-19T15:30:00| }, payload: write({ remision: '10000000-0000-4000-8000-000000001004-1', archivo: 'remision_10000000-0000-4000-8000-000000001004_1.csv', estado: 'RECHAZADA', depositada: '2026-11-18T15:50:00-06:00', motivo: 'Dirección incorrecta', fecha: '2026-11-19T09:30:00-06:00' }, 'application/json') } ] filter ((m) -> m.attributes.fileName == vars.ackName))[0].payload, 'application/json')]"/>
+	</flow>
+
+	<munit:test name="api_getDispatch_rejected_returns200" description="GET /dispatch-notes/{orderId} returns 200 with the rejected note and its reason">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="sapi-sftp-orders-main"/>
+		</munit:enable-flow-sources>
+		<munit:behavior>
+			<munit-tools:mock-when processor="sftp:read">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="sftp-read-acknowledgment"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-call flow="api-mock-sftp-read-flow"/>
+			</munit-tools:mock-when>
+			<munit-tools:mock-when processor="sftp:list">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="sftp-list-folder"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-call flow="api-mock-sftp-list-flow"/>
+			</munit-tools:mock-when>
+		</munit:behavior>
+		<munit:execution>
+			<http:request method="GET" config-ref="test-api-client" path="/api/v1/sftp/orders/dispatch-notes/10000000-0000-4000-8000-000000001004">
+				<http:headers><![CDATA[#[{ client_id: 'test-id', client_secret: 'test-secret' }]]]></http:headers>
+				<http:response-validator><http:success-status-code-validator values="0..599"/></http:response-validator>
+			</http:request>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(200)]"/>
+			<munit-tools:assert-that expression="#[payload.status]" is="#[MunitTools::equalTo('REJECTED')]"/>
+			<munit-tools:assert-that expression="#[payload.reason]" is="#[MunitTools::equalTo('Dirección incorrecta')]"/>
+		</munit:validation>
+	</munit:test>
+
+	<munit:test name="api_getDispatch_unknown_returns404" description="An order without a dispatch note returns 404 DISPATCH_NOTE_NOT_FOUND with the ErrorResponse">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="sapi-sftp-orders-main"/>
+		</munit:enable-flow-sources>
+		<munit:behavior>
+			<munit-tools:mock-when processor="sftp:read">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="sftp-read-acknowledgment"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-call flow="api-mock-sftp-read-flow"/>
+			</munit-tools:mock-when>
+			<munit-tools:mock-when processor="sftp:list">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="sftp-list-folder"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-call flow="api-mock-sftp-list-flow"/>
+			</munit-tools:mock-when>
+		</munit:behavior>
+		<munit:execution>
+			<http:request method="GET" config-ref="test-api-client" path="/api/v1/sftp/orders/dispatch-notes/10000000-0000-4000-8000-000000001001">
+				<http:headers><![CDATA[#[{ client_id: 'test-id', client_secret: 'test-secret' }]]]></http:headers>
+				<http:response-validator><http:success-status-code-validator values="0..599"/></http:response-validator>
+			</http:request>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(404)]"/>
+			<munit-tools:assert-that expression="#[payload.code]" is="#[MunitTools::equalTo('DISPATCH_NOTE_NOT_FOUND')]"/>
+			<munit-tools:assert-that expression="#[payload.retryable]" is="#[MunitTools::equalTo(false)]"/>
+		</munit:validation>
+	</munit:test>
+
+	<munit:test name="api_postDispatch_returns201" description="POST /dispatch-notes returns 201 with sequence 1 for an order without notes">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="sapi-sftp-orders-main"/>
+		</munit:enable-flow-sources>
+		<munit:behavior>
+			<munit-tools:mock-when processor="sftp:read">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="sftp-read-acknowledgment"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-call flow="api-mock-sftp-read-flow"/>
+			</munit-tools:mock-when>
+			<munit-tools:mock-when processor="sftp:list">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="sftp-list-folder"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-call flow="api-mock-sftp-list-flow"/>
+			</munit-tools:mock-when>
+			<munit-tools:mock-when processor="sftp:write">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="sftp-write-temporary-file"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/java --- null]"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit-tools:mock-when processor="sftp:rename">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="sftp-rename-to-final-name"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/java --- null]"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+		</munit:behavior>
+		<munit:execution>
+			<http:request method="POST" config-ref="test-api-client" path="/api/v1/sftp/orders/dispatch-notes">
+				<http:body><![CDATA[#[output application/json --- { orderId: '10000000-0000-4000-8000-000000001001', customer: { name: 'Ferretería Angelópolis', address: { street: 'Blvd. 5 de Mayo 300', city: 'Puebla', state: 'Puebla', postalCode: '72000' } }, lines: [ { sku: 'SKU-100', quantity: 4 }, { sku: 'SKU-200', quantity: 1 } ] }]]]></http:body>
+				<http:headers><![CDATA[#[{ client_id: 'test-id', client_secret: 'test-secret', 'Content-Type': 'application/json' }]]]></http:headers>
+				<http:response-validator><http:success-status-code-validator values="0..599"/></http:response-validator>
+			</http:request>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(201)]"/>
+			<munit-tools:assert-that expression="#[payload.sequence]" is="#[MunitTools::equalTo(1)]"/>
+			<munit-tools:assert-that expression="#[payload.status]" is="#[MunitTools::equalTo('PENDING')]"/>
+		</munit:validation>
+	</munit:test>
+
+	<munit:test name="api_listDispatch_invalidStatus_returns400" description="A status outside PENDING, SIGNED and REJECTED breaks the contract and returns 400">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="sapi-sftp-orders-main"/>
+		</munit:enable-flow-sources>
+		<munit:execution>
+			<http:request method="GET" config-ref="test-api-client" path="/api/v1/sftp/orders/dispatch-notes?status=LOST">
+				<http:headers><![CDATA[#[{ client_id: 'test-id', client_secret: 'test-secret' }]]]></http:headers>
+				<http:response-validator><http:success-status-code-validator values="0..599"/></http:response-validator>
+			</http:request>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(400)]"/>
+			<munit-tools:assert-that expression="#[payload.code]" is="#[MunitTools::equalTo('VALIDATION_ERROR')]"/>
+		</munit:validation>
+	</munit:test>
+
+	<munit:test name="api_sftpDown_returns503WithRetryAfter" description="With the SFTP down it returns a retryable 503 with Retry-After">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="sapi-sftp-orders-main"/>
+		</munit:enable-flow-sources>
+		<munit:behavior>
+			<munit-tools:mock-when processor="sftp:list">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="sftp-list-folder"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:error typeId="SFTP:CONNECTIVITY"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+		</munit:behavior>
+		<munit:execution>
+			<http:request method="GET" config-ref="test-api-client" path="/api/v1/sftp/orders/dispatch-notes/10000000-0000-4000-8000-000000001003">
+				<http:headers><![CDATA[#[{ client_id: 'test-id', client_secret: 'test-secret' }]]]></http:headers>
+				<http:response-validator><http:success-status-code-validator values="0..599"/></http:response-validator>
+			</http:request>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(503)]"/>
+			<munit-tools:assert-that expression="#[payload.code]" is="#[MunitTools::equalTo('SERVICE_UNAVAILABLE')]"/>
+			<munit-tools:assert-that expression="#[payload.retryable]" is="#[MunitTools::equalTo(true)]"/>
+			<munit-tools:assert-that expression="#[attributes.headers.'retry-after']" is="#[MunitTools::equalTo('30')]"/>
+		</munit:validation>
+	</munit:test>
+
+</mule>
