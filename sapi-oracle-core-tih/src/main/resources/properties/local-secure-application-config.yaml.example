@@ -1,8 +1,0 @@
-# Plantilla de credenciales. Copia este archivo como local-secure-application-config.yaml
-# (ese archivo está en .gitignore) y reemplaza los valores.
-#
-# Por ahora los valores van en claro y SOLO para uso local.
-# Cuando se aplique la skill secure-mule-app, estos mismos valores pasarán a ![cifrado].
-db:
-  user: "CHANGE_ME"
-  password: "CHANGE_ME"

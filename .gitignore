@@ -13,9 +13,6 @@ mvn-last.log
 .classpath
 .project
 
-# Proyecto ajeno a TIH
-/sapi-stores/
-
 # Herramientas de asistente de código (locales)
 .claude/
 .agents/
@@ -42,3 +39,50 @@ reports/
 Thumbs.db
 .vscode/
 .idea/
+
+# PoC agéntica (D3): copias de Studio en la raíz y proyecto ajeno; Studio importa desde apps/
+/*-tih/
+/sapi-stores/
+
+# PoC agéntica: salidas locales, túneles, datos locales, certificados y temporales
+**/bat-generated/reports/
+/infra/tunnels/*.local.yml
+/data/*.local.json
+/infra/salesforce/certs/
+*.jks
+/tmp/
+**/exchange_modules/
+
+# Borradores y comprobantes de la skill archify (los HTML finales se copian a docs/diagrams/)
+/.archify/
+
+# Generados por data/tools/build-seeds.mjs (se vuelven a crear; no se versionan)
+/infra/oracle/sql/erp/20-seed.generated.sql
+/infra/sftp/seed/
+/data/logistics-rules.json
+
+# Mappings de WireMock: los genera data/tools/build-seeds.mjs
+/infra/wiremock/mappings/
+
+# Llave del SFTP de logística: la genera start-infra (ver infra/sftp/keys/README.md)
+/infra/sftp/keys/*
+!/infra/sftp/keys/README.md
+
+# Estado local de la CLI de Salesforce
+/infra/salesforce/.sf/
+/infra/salesforce/.sfdx/
+
+
+# Copias que Studio crea en la raíz al importar con "Copy projects into workspace" (D3: se trabaja en apps/)
+/xapi-online-store/
+/mcp-online-store/
+/papi-customers/
+/papi-orders/
+/papi-order-requests/
+/papi-notifications/
+/sapi-oracle-core/
+/sapi-crm/
+/sapi-sftp-orders/
+/sapi-price-providers/
+/poc-resilience/
+/services/
