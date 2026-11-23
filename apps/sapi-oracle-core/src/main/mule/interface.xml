@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:apikit="http://www.mulesoft.org/schema/mule/mule-apikit"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+		http://www.mulesoft.org/schema/mule/mule-apikit http://www.mulesoft.org/schema/mule/mule-apikit/current/mule-apikit.xsd">
+
+
+	<apikit:config name="sapi-oracle-core-config"
+		api="resource::9885f017-0660-4c80-a27f-eb006d124bd8:sapi-oracle-core:1.0.1:raml:zip:sapi-oracle-core.raml"
+		outboundHeadersMapName="outboundHeaders"
+		httpStatusVarName="httpStatus"
+		doc:name="APIkit Router config"
+		doc:description="Validates each request against the sapi-oracle-core RAML and routes it to its interface flow"/>
+
+	<flow name="sapi-oracle-core-main"
+		doc:name="sapi-oracle-core-main"
+		doc:description="HTTP entry point. Errors are handled by the global error handler">
+		<http:listener config-ref="sapi-oracle-core-httpListenerConfig" path="${http.listener.basePath}/*"
+			doc:name="Listener"
+			doc:description="Receives requests on the API base path">
+			<http:response statusCode="#[vars.httpStatus default 200]">
+				<http:headers>#[vars.outboundHeaders default {}]</http:headers>
+			</http:response>
+			<http:error-response statusCode="#[vars.httpStatus default 500]">
+				<http:body>#[payload]</http:body>
+				<http:headers>#[vars.outboundHeaders default {}]</http:headers>
+			</http:error-response>
+		</http:listener>
+		<apikit:router config-ref="sapi-oracle-core-config"
+			doc:name="APIkit Router"
+			doc:description="Routes the request to the interface flow matching the RAML method and resource"/>
+	</flow>
+
+	<!-- Interface flows with the APIkit scaffolding names: they only delegate to the implementation. Do not rename. -->
+
+	<flow name="get:\orders:sapi-oracle-core-config"
+		doc:name="get:\orders"
+		doc:description="List orders by status and date">
+		<flow-ref name="orders-list-flow" doc:name="orders-list-flow"
+			doc:description="Delegates to the order listing"/>
+	</flow>
+
+	<flow name="post:\orders:application\json:sapi-oracle-core-config"
+		doc:name="post:\orders"
+		doc:description="Create order (starts RECEIVED)">
+		<flow-ref name="orders-create-flow" doc:name="orders-create-flow"
+			doc:description="Delegates to the order creation"/>
+	</flow>
+
+	<flow name="get:\orders\(orderId):sapi-oracle-core-config"
+		doc:name="get:\orders\(orderId)"
+		doc:description="Get an order with its lines">
+		<flow-ref name="orders-get-flow" doc:name="orders-get-flow"
+			doc:description="Delegates to the order lookup"/>
+	</flow>
+
+	<flow name="patch:\orders\(orderId):application\json:sapi-oracle-core-config"
+		doc:name="patch:\orders\(orderId)"
+		doc:description="Confirm or reject a RECEIVED order">
+		<flow-ref name="orders-patch-flow" doc:name="orders-patch-flow"
+			doc:description="Delegates to the status update"/>
+	</flow>
+
+	<flow name="get:\inventory\items:sapi-oracle-core-config"
+		doc:name="get:\inventory\items"
+		doc:description="Get inventory by page or by ids">
+		<flow-ref name="inventory-items-get-flow" doc:name="inventory-items-get-flow"
+			doc:description="Delegates to the inventory lookup"/>
+	</flow>
+
+	<flow name="post:\inventory\movements:application\json:sapi-oracle-core-config"
+		doc:name="post:\inventory\movements"
+		doc:description="Register an outbound or restock movement">
+		<flow-ref name="inventory-movements-post-flow" doc:name="inventory-movements-post-flow"
+			doc:description="Delegates to the movement registration"/>
+	</flow>
+
+</mule>

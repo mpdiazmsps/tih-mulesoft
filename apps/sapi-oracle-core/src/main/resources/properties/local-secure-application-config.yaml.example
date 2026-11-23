@@ -1,0 +1,6 @@
+# Copy as local-secure-application-config.yaml (ignored by Git) and fill in.
+# Same values as APP_USER and APP_USER_PASSWORD in infra/oracle/credentials.local (schema STORE_APP).
+# Encrypt the values as ![...] with the POC_ENC_KEY key (secure-mule-app skill); locally they may also be plain text.
+db:
+  user: "STORE_APP"
+  password: "CHANGE_ME"

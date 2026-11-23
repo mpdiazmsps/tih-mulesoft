@@ -1,0 +1,182 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:db="http://www.mulesoft.org/schema/mule/db"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/db http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd
+		http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+	<!-- ERP inventory with its providers (INVENTORY_PROVIDERS) and stock movements.
+	     An outbound movement never leaves negative stock (CHK_INV_STOCK) and a movement reference is unique (D7). -->
+
+	<!-- ===================================================== GET /inventory/items -->
+	<flow name="inventory-items-get-flow" doc:name="inventory-items-get-flow"
+		doc:description="Without ids lists the inventory by page; with ids returns up to 100 items with their providers">
+		<choice doc:name="choice-by-ids" doc:description="With ids it is the batch lookup with providers">
+			<when expression="#[not isEmpty(attributes.queryParams.ids default '')]" doc:name="when-by-ids" doc:description="Items requested by id">
+				<set-variable variableName="ids" value="#[attributes.queryParams.ids]" doc:name="set-ids" doc:description="Comma-separated ids"/>
+				<db:select config-ref="oracle-core-db-config" doc:name="db-select-items-by-ids"
+					doc:description="Items whose ids are in the list (unknown ids are left out)">
+					<db:sql><![CDATA[SELECT ID, SKU, NAME, STOCK_QTY, LOCAL_PRICE, CURRENCY FROM INVENTORY
+ WHERE INSTR(',' || :ids || ',', ',' || ID || ',') > 0 ORDER BY SKU]]></db:sql>
+					<db:input-parameters><![CDATA[#[output application/java --- { ids: vars.ids }]]]></db:input-parameters>
+				</db:select>
+				<set-variable variableName="itemRows" value="#[payload]" doc:name="set-item-rows" doc:description="INVENTORY rows"/>
+				<db:select config-ref="oracle-core-db-config" doc:name="db-select-item-providers"
+					doc:description="Providers of those items with their last price">
+					<db:sql><![CDATA[SELECT ITEM_ID, PROVIDER_ABV, EXTERNAL_ID, IS_PREFERRED, LAST_PRICE,
+       TO_CHAR(SYS_EXTRACT_UTC(LAST_PRICE_AT), 'YYYYMMDDHH24MISS') AS LAST_PRICE_AT
+  FROM INVENTORY_PROVIDERS
+ WHERE INSTR(',' || :ids || ',', ',' || ITEM_ID || ',') > 0 ORDER BY ITEM_ID, PROVIDER_ABV]]></db:sql>
+					<db:input-parameters><![CDATA[#[output application/java --- { ids: vars.ids }]]]></db:input-parameters>
+				</db:select>
+				<ee:transform doc:name="transform-items-with-providers" doc:description="Items with their providers and the preferred one flagged">
+					<ee:message>
+						<ee:set-payload><![CDATA[%dw 2.0
+import toInventoryItems from modules::erp
+output application/json
+---
+toInventoryItems(vars.itemRows, payload)]]></ee:set-payload>
+					</ee:message>
+				</ee:transform>
+			</when>
+			<otherwise doc:name="otherwise-by-page" doc:description="Inventory listing for the catalog">
+				<ee:transform doc:name="transform-page-params" doc:description="Page offset and size">
+					<ee:message/>
+					<ee:variables>
+						<ee:set-variable variableName="pageParams"><![CDATA[%dw 2.0
+output application/java
+var q = attributes.queryParams default {}
+var size = (q.size default p('paging.defaultSize')) as Number
+---
+{ pageOffset: (((q.page default 1) as Number) - 1) * size, pageSize: size }]]></ee:set-variable>
+					</ee:variables>
+				</ee:transform>
+				<db:select config-ref="oracle-core-db-config" doc:name="db-select-items-page"
+					doc:description="One inventory page sorted by SKU">
+					<db:sql><![CDATA[SELECT ID, SKU, NAME, STOCK_QTY, LOCAL_PRICE, CURRENCY FROM INVENTORY
+ ORDER BY SKU OFFSET :pageOffset ROWS FETCH NEXT :pageSize ROWS ONLY]]></db:sql>
+					<db:input-parameters><![CDATA[#[vars.pageParams]]]></db:input-parameters>
+				</db:select>
+				<ee:transform doc:name="transform-items" doc:description="Items without providers">
+					<ee:message>
+						<ee:set-payload><![CDATA[%dw 2.0
+import toInventoryItems from modules::erp
+output application/json
+---
+toInventoryItems(payload, null)]]></ee:set-payload>
+					</ee:message>
+				</ee:transform>
+			</otherwise>
+		</choice>
+	</flow>
+
+	<!-- ================================================= POST /inventory/movements -->
+	<flow name="inventory-movements-post-flow" doc:name="inventory-movements-post-flow"
+		doc:description="Registers an outbound or restock movement once per reference; an outbound above stock returns 409">
+		<set-variable variableName="movement" value="#[payload]" doc:name="set-movement" doc:description="Movement request"/>
+		<set-variable variableName="stockDelta" value="#[output application/java --- if (vars.movement.'type' == 'OUTBOUND') -(vars.movement.quantity) else vars.movement.quantity]"
+			doc:name="set-stock-delta" doc:description="Negative for an outbound movement, positive for a restock"/>
+		<db:select config-ref="oracle-core-db-config" doc:name="db-select-movement-by-reference"
+			doc:description="Looks for a movement already registered with the same reference">
+			<db:sql><![CDATA[SELECT ID, ITEM_ID, MOVEMENT_TYPE, QTY, REFERENCE, ORDER_ID, RESULTING_STOCK,
+       TO_CHAR(SYS_EXTRACT_UTC(CREATED_AT), 'YYYYMMDDHH24MISS') AS CREATED_AT
+  FROM INVENTORY_MOVEMENTS WHERE REFERENCE = :reference]]></db:sql>
+			<db:input-parameters><![CDATA[#[output application/java --- { reference: vars.movement.reference }]]]></db:input-parameters>
+		</db:select>
+		<choice doc:name="choice-already-registered" doc:description="A repeated reference returns the original movement without moving stock">
+			<when expression="#[not isEmpty(payload)]" doc:name="when-already-registered" doc:description="Idempotency by reference (D7)">
+				<flow-ref name="movement-existing-response-subflow" doc:name="flow-ref-existing-movement-response" doc:description="200 with the original movement"/>
+			</when>
+			<otherwise doc:name="otherwise-new-movement" doc:description="Moves the stock and registers the movement">
+				<try doc:name="try-reference-race" doc:description="If another request registered the same reference at the same time, the original is returned">
+					<try transactionalAction="ALWAYS_BEGIN" transactionType="LOCAL"
+						doc:name="try-movement-transaction" doc:description="Stock and movement together: both or neither">
+						<db:update config-ref="oracle-core-db-config" doc:name="db-update-stock"
+							doc:description="Adds to or subtracts from stock; Oracle rejects negative stock">
+							<db:sql><![CDATA[UPDATE INVENTORY SET STOCK_QTY = STOCK_QTY + :delta WHERE ID = :itemId]]></db:sql>
+							<db:input-parameters><![CDATA[#[output application/java --- { itemId: vars.movement.itemId, delta: vars.stockDelta }]]]></db:input-parameters>
+						</db:update>
+						<choice doc:name="choice-item-exists" doc:description="No updated rows means the item does not exist">
+							<when expression="#[payload.affectedRows == 0]" doc:name="when-item-not-found" doc:description="The item is not in INVENTORY">
+								<raise-error type="APP:ITEM_NOT_FOUND" description="The item does not exist"
+									doc:name="raise-item-not-found" doc:description="Se responde 404"/>
+							</when>
+						</choice>
+						<db:select config-ref="oracle-core-db-config" doc:name="db-select-resulting-stock"
+							doc:description="Stock left after the movement">
+							<db:sql><![CDATA[SELECT STOCK_QTY FROM INVENTORY WHERE ID = :itemId]]></db:sql>
+							<db:input-parameters><![CDATA[#[output application/java --- { itemId: vars.movement.itemId }]]]></db:input-parameters>
+						</db:select>
+						<set-variable variableName="newMovement" doc:name="set-new-movement" doc:description="Movement with its id and the resulting stock"
+							value="#[output application/java --- { ID: uuid(), ITEM_ID: vars.movement.itemId, MOVEMENT_TYPE: vars.movement.'type', QTY: vars.movement.quantity, REFERENCE: vars.movement.reference, ORDER_ID: vars.movement.orderId, RESULTING_STOCK: payload[0].STOCK_QTY as Number, CREATED_AT: (now() >> 'UTC') as String {format: 'yyyyMMddHHmmss'} }]"/>
+						<db:insert config-ref="oracle-core-db-config" doc:name="db-insert-movement"
+							doc:description="Inserts the movement; the reference is unique">
+							<db:sql><![CDATA[INSERT INTO INVENTORY_MOVEMENTS (ID, ITEM_ID, MOVEMENT_TYPE, QTY, REFERENCE, ORDER_ID, RESULTING_STOCK)
+VALUES (:id, :itemId, :movementType, :qty, :reference, :orderId, :resultingStock)]]></db:sql>
+							<db:input-parameters><![CDATA[#[output application/java --- { id: vars.newMovement.ID, itemId: vars.newMovement.ITEM_ID, movementType: vars.newMovement.MOVEMENT_TYPE, qty: vars.newMovement.QTY, reference: vars.newMovement.REFERENCE, orderId: vars.newMovement.ORDER_ID, resultingStock: vars.newMovement.RESULTING_STOCK }]]]></db:input-parameters>
+						</db:insert>
+						<error-handler>
+							<on-error-propagate type="ANY" when="#[(error.description default '') contains 'ORA-02290']"
+								doc:name="on-error-insufficient-stock" doc:description="The outbound movement would leave negative stock">
+								<raise-error type="APP:INSUFFICIENT_STOCK" description="The outbound movement would leave negative stock"
+									doc:name="raise-insufficient-stock" doc:description="Returns 409 and nothing changes"/>
+							</on-error-propagate>
+							<on-error-propagate type="ANY" when="#[(error.description default '') contains 'ORA-00001']"
+								doc:name="on-error-reference-taken" doc:description="Another request registered the same reference: this attempt is rolled back">
+								<raise-error type="APP:MOVEMENT_ALREADY_REGISTERED" description="The reference is already registered"
+									doc:name="raise-movement-already-registered" doc:description="Caught outside to return the original"/>
+							</on-error-propagate>
+							<on-error-propagate type="ANY" when="#[(error.description default '') contains 'ORA-02291']"
+								doc:name="on-error-unknown-order" doc:description="The movement orderId does not exist">
+								<raise-error type="APP:VALIDATION_ERROR" description="The movement order does not exist"
+									doc:name="raise-unknown-order" doc:description="Se responde 400"/>
+							</on-error-propagate>
+						</error-handler>
+					</try>
+					<ee:transform doc:name="transform-movement-created" doc:description="Registered movement">
+						<ee:message>
+							<ee:set-payload><![CDATA[%dw 2.0
+import toMovement from modules::erp
+output application/json
+---
+toMovement(vars.newMovement)]]></ee:set-payload>
+						</ee:message>
+					</ee:transform>
+					<set-variable variableName="httpStatus" value="#[201]" doc:name="set-http-status-201" doc:description="Movement created"/>
+					<error-handler>
+						<on-error-continue type="APP:MOVEMENT_ALREADY_REGISTERED" logException="false"
+							doc:name="on-error-return-original" doc:description="Stock did not move twice: returns the movement that won">
+							<db:select config-ref="oracle-core-db-config" doc:name="db-select-existing-movement"
+								doc:description="Reads the movement registered by the other request">
+								<db:sql><![CDATA[SELECT ID, ITEM_ID, MOVEMENT_TYPE, QTY, REFERENCE, ORDER_ID, RESULTING_STOCK,
+       TO_CHAR(SYS_EXTRACT_UTC(CREATED_AT), 'YYYYMMDDHH24MISS') AS CREATED_AT
+  FROM INVENTORY_MOVEMENTS WHERE REFERENCE = :reference]]></db:sql>
+								<db:input-parameters><![CDATA[#[output application/java --- { reference: vars.movement.reference }]]]></db:input-parameters>
+							</db:select>
+							<flow-ref name="movement-existing-response-subflow" doc:name="flow-ref-existing-movement-response" doc:description="200 with the original movement"/>
+						</on-error-continue>
+					</error-handler>
+				</try>
+			</otherwise>
+		</choice>
+	</flow>
+
+	<sub-flow name="movement-existing-response-subflow" doc:name="movement-existing-response-subflow"
+		doc:description="Returns 200 with the already registered movement (first payload row)">
+		<ee:transform doc:name="transform-existing-movement" doc:description="Original movement">
+			<ee:message>
+				<ee:set-payload><![CDATA[%dw 2.0
+import toMovement from modules::erp
+output application/json
+---
+toMovement(payload[0])]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<set-variable variableName="httpStatus" value="#[200]" doc:name="set-http-status-200" doc:description="Movement already registered"/>
+	</sub-flow>
+
+</mule>

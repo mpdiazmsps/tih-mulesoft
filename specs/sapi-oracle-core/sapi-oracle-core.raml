@@ -1,0 +1,188 @@
+#%RAML 1.0
+title: sapi-oracle-core
+version: v1
+baseUri: https://{host}/api/{version}/core/store
+baseUriParameters:
+  host:
+    description: Public CloudHub 2.0 endpoint of the sapi-oracle-core application.
+    type: string
+    example: sapi-oracle-core-a1b2c3.usa-e1.cloudhub.io
+protocols: [HTTPS]
+mediaType: application/json
+description: |
+  The only gateway to the ERP (Oracle, schema STORE_APP). It translates between SQL and the common format;
+  nobody else talks to the database.
+  - Orders: ORDERS is the header with its status and ORDER_ITEMS holds the lines. An order is born RECEIVED
+    and moves to CONFIRMED or REJECTED; there is no other path.
+  - Inventory: each product has one or more providers (INVENTORY_PROVIDERS) and exactly one preferred.
+    Confirming an order stores the last price of the provider used.
+  - Movements: an outbound movement never leaves the stock negative (409 and nothing changes).
+    The reference is unique: repeating it returns the existing movement without moving the stock again.
+
+uses:
+  common: ../fragments/poc-common/poc-common.raml
+
+/orders:
+  post:
+    displayName: Create order
+    description: Inserts the header and its lines in a single transaction. The order is born RECEIVED.
+    is: [common.secured, common.validated, common.conflict, common.retryable]
+    body:
+      application/json:
+        type: common.OrderCreateRequest
+    responses:
+      201:
+        description: Order created.
+        body:
+          application/json:
+            type: common.Order
+            example:
+              orderId: 10000000-0000-4000-8000-000000001001
+              customerId: 003Hs00000ANGELAAA
+              status: RECEIVED
+              currency: MXN
+              lines:
+                - itemId: 20000000-0000-4000-8000-000000000300
+                  sku: SKU-300
+                  quantity: 2
+              createdAt: 2026-11-20T08:00:00-06:00
+  get:
+    displayName: List orders
+    description: Orders by status and since a date, oldest first.
+    is: [common.secured, common.validated, common.paged, common.retryable]
+    queryParameters:
+      status:
+        description: Order status. Without it, every order is listed.
+        type: common.OrderStatus
+        required: false
+      from:
+        description: Only orders created since this date.
+        type: datetime
+        required: false
+        example: 2026-11-19T00:00:00-06:00
+    responses:
+      200:
+        description: Orders found (the list may be empty).
+        body:
+          application/json:
+            type: common.Order[]
+            example:
+              - orderId: 10000000-0000-4000-8000-000000001001
+                customerId: 003Hs00000ANGELAAA
+                status: RECEIVED
+                currency: MXN
+                lines:
+                  - itemId: 20000000-0000-4000-8000-000000000300
+                    sku: SKU-300
+                    quantity: 2
+                createdAt: 2026-11-20T08:00:00-06:00
+
+  /{orderId}:
+    uriParameters:
+      orderId:
+        type: common.Uuid
+    get:
+      displayName: Get order
+      description: An order with its lines.
+      is: [common.secured, common.not-found, common.retryable]
+      responses:
+        200:
+          description: Order found.
+          body:
+            application/json:
+              type: common.Order
+    patch:
+      displayName: Change order status
+      description: |
+        Confirms or rejects a RECEIVED order. Confirming stores the price and price source of each line,
+        and the last price of the provider used. An order that is not RECEIVED returns 409 INVALID_TRANSITION.
+      is: [common.secured, common.validated, common.not-found, common.conflict, common.retryable]
+      body:
+        application/json:
+          type: common.OrderStatusUpdate
+      responses:
+        200:
+          description: Order with its new status.
+          body:
+            application/json:
+              type: common.Order
+
+/inventory:
+  /items:
+    get:
+      displayName: Get inventory
+      description: |
+        Without `ids`, lists the inventory page by page for the catalog (without providers).
+        With `ids`, returns up to 100 items in one call, including their providers; unknown ids are left out.
+      is: [common.secured, common.validated, common.paged, common.retryable]
+      queryParameters:
+        ids:
+          description: Comma-separated item ids (up to 100).
+          type: string
+          required: false
+          pattern: '^[0-9a-fA-F-]{36}(,[0-9a-fA-F-]{36}){0,99}$'
+          example: 20000000-0000-4000-8000-000000000100,20000000-0000-4000-8000-000000000200
+      responses:
+        200:
+          description: Items found.
+          body:
+            application/json:
+              type: common.InventoryItem[]
+              example:
+                - itemId: 20000000-0000-4000-8000-000000000100
+                  sku: SKU-100
+                  name: Producto 100
+                  stock: 2
+                  localPrice: 0
+                  currency: MXN
+                  providers:
+                    - abv: FAK
+                      externalId: 7
+                      preferred: true
+                      lastPrice: 189.00
+                    - abv: ESC
+                      externalId: 122
+                      preferred: false
+                    - abv: BOR
+                      externalId: 3
+                      preferred: false
+                - itemId: 20000000-0000-4000-8000-000000000200
+                  sku: SKU-200
+                  name: Producto 200
+                  stock: 40
+                  localPrice: 250.00
+                  currency: MXN
+                  providers:
+                    - abv: FAK
+                      externalId: 8
+                      preferred: true
+                    - abv: ESC
+                      externalId: 123
+                      preferred: false
+                    - abv: BOR
+                      externalId: 4
+                      preferred: false
+
+  /movements:
+    post:
+      displayName: Record stock movement
+      description: |
+        Outbound or restock movement in a single transaction.
+        - 201: new movement.
+        - 200: the reference already existed; returns the original movement and the stock does not change.
+        - 409 INSUFFICIENT_STOCK: the outbound movement would leave the stock negative; nothing changes.
+      is: [common.secured, common.validated, common.not-found, common.conflict, common.retryable]
+      body:
+        application/json:
+          type: common.InventoryMovementRequest
+      responses:
+        201:
+          description: Movement recorded.
+          body:
+            application/json:
+              type: common.InventoryMovement
+        200:
+          description: The reference already existed. Returns the original movement.
+          body:
+            application/json:
+              type: common.InventoryMovement

@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns:secure-properties="http://www.mulesoft.org/schema/mule/secure-properties"
+	xmlns:db="http://www.mulesoft.org/schema/mule/db"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+		http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/secure-properties http://www.mulesoft.org/schema/mule/secure-properties/current/mule-secure-properties.xsd
+		http://www.mulesoft.org/schema/mule/db http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd">
+
+	<global-property name="env" value="local"
+		doc:name="Global Property"
+		doc:description="Active environment: local by default; CloudHub passes env=cloud"/>
+
+	<configuration-properties file="properties/${env}-application-config.yaml"
+		doc:name="Configuration properties"
+		doc:description="Non-sensitive environment properties: listener, Oracle connection, pool and paging"/>
+
+	<secure-properties:config name="Secure_Properties_Config" file="properties/${env}-secure-application-config.yaml" key="${encryption.key}"
+		doc:name="Secure Properties Config"
+		doc:description="STORE_APP user and password encrypted with AES/CBC. The key is passed with -M-Dencryption.key">
+		<secure-properties:encrypt algorithm="AES" mode="CBC"/>
+	</secure-properties:config>
+
+	<configuration defaultErrorHandler-ref="global-error-handler"
+		doc:name="Configuration"
+		doc:description="Global error handler: turns any error into the contract ErrorResponse"/>
+
+	<http:listener-config name="sapi-oracle-core-httpListenerConfig"
+		doc:name="HTTP Listener config"
+		doc:description="API HTTP listener. Host and port come from the environment properties">
+		<http:listener-connection host="${http.listener.host}" port="${http.listener.port}"
+			doc:description="Opens the environment HTTP port; on CloudHub the load balancer terminates TLS"/>
+	</http:listener-config>
+
+	<db:config name="oracle-core-db-config"
+		doc:name="Database Config"
+		doc:description="Connection to the STORE_APP schema (ERP). Host, port, service, pool and reconnection come from the properties">
+		<db:oracle-connection host="${db.host}" port="${db.port}" serviceName="${db.serviceName}"
+			user="${secure::db.user}" password="${secure::db.password}">
+			<!-- The XSD requires reconnection before pooling-profile -->
+			<reconnection>
+				<reconnect frequency="${db.reconnection.frequencyMillis}" count="${db.reconnection.attempts}"/>
+			</reconnection>
+			<db:pooling-profile minPoolSize="${db.pool.minPoolSize}" maxPoolSize="${db.pool.maxPoolSize}"/>
+		</db:oracle-connection>
+	</db:config>
+
+	<!-- Global handler (enabled through defaultErrorHandler-ref). It only translates errors: no business logic. -->
+	<error-handler name="global-error-handler"
+		doc:name="Error Handler"
+		doc:description="Turns any error into the contract ErrorResponse with the matching HTTP status">
+		<on-error-propagate type="ANY" enableNotifications="true" logException="false"
+			doc:name="On Error Propagate"
+			doc:description="Handles APIkit, business (APP) and database (DB) errors">
+			<logger level="ERROR"
+				message="#['ERROR - ' ++ (error.errorType.namespace default 'MULE') ++ ':' ++ (error.errorType.identifier default 'ANY') ++ ' - ' ++ (error.description default '') ++ ' correlationId: ' ++ correlationId]"
+				doc:name="logger-global-error"
+				doc:description="Logs the error type, its description and the correlationId"/>
+			<ee:transform doc:name="transform-resolve-error-info"
+				doc:description="Resolves HTTP status, code, message and retryable flag from the error type">
+				<ee:message/>
+				<ee:variables>
+					<ee:set-variable variableName="errorInfo" resource="dataweave/mapping-error-info.dwl"/>
+				</ee:variables>
+			</ee:transform>
+			<ee:transform doc:name="transform-build-error-response"
+				doc:description="Builds the ErrorResponse, the HTTP status and the Retry-After header when the error is retryable">
+				<ee:message>
+					<ee:set-payload resource="dataweave/mapping-error-response.dwl"/>
+				</ee:message>
+				<ee:variables>
+					<ee:set-variable variableName="httpStatus"><![CDATA[%dw 2.0
+output application/java
+---
+vars.errorInfo.status]]></ee:set-variable>
+					<ee:set-variable variableName="outboundHeaders"><![CDATA[%dw 2.0
+output application/java
+---
+if (vars.errorInfo.status == 503) { "Retry-After": p('error.retryAfterSeconds') } else {}]]></ee:set-variable>
+				</ee:variables>
+			</ee:transform>
+		</on-error-propagate>
+	</error-handler>
+
+</mule>

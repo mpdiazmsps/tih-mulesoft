@@ -1,6 +1,0 @@
-# Copia como dev-secure-application-config.yaml (ignorado por Git) y completa.
-# Mismos valores que APP_USER y APP_USER_PASSWORD de infra/oracle/credentials.local.
-# Puedes dejarlos en claro (solo uso local) o cifrarlos como ![...] con tu propia clave (ver README).
-db:
-  user: "STORE_APP"
-  password: "CHANGE_ME"

@@ -1,0 +1,28 @@
+# NON-sensitive configuration for the local environment (the default one).
+# The Oracle user and password live in local-secure-application-config.yaml (user STORE_APP, never INTEGRATION_APP).
+http:
+  listener:
+    host: "0.0.0.0"
+    port: "8091"
+    basePath: "/api/v1/core/store"
+
+db:
+  # poc-oracle (infra/docker-compose.yml): service FREEPDB1, schema STORE_APP. Default local port 1523
+  # (if your infra/.env uses another one, override it with -M-Ddb.port=<port>).
+  host: "localhost"
+  port: "1523"
+  serviceName: "FREEPDB1"
+  pool:
+    minPoolSize: "1"
+    maxPoolSize: "5"
+  reconnection:
+    frequencyMillis: "2000"
+    attempts: "3"
+
+# Default page size for listings
+paging:
+  defaultSize: "20"
+
+# Seconds suggested to the consumer in the Retry-After header when Oracle is unavailable
+error:
+  retryAfterSeconds: "30"

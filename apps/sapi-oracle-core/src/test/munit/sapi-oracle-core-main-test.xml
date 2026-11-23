@@ -1,0 +1,203 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:munit="http://www.mulesoft.org/schema/mule/munit"
+	xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+		http://www.mulesoft.org/schema/mule/munit http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+		http://www.mulesoft.org/schema/mule/munit-tools http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd">
+
+	<!-- End-to-end HTTP tests: real listener (8091), APIkit with the Exchange contract, interface flows,
+	     global error handler and response codes. Oracle is mocked. -->
+	<munit:config name="sapi-oracle-core-main-test.xml"/>
+
+	<!-- MUnit initializes lazily and APIkit builds its routes from the flows already initialized:
+	     the 6 interface flows are referenced once, without running them. -->
+	<munit:before-suite name="sapi-oracle-core-main-warm-up">
+		<choice>
+			<when expression="#[false]">
+				<flow-ref name="get:\orders:sapi-oracle-core-config"/>
+				<flow-ref name="post:\orders:application\json:sapi-oracle-core-config"/>
+				<flow-ref name="get:\orders\(orderId):sapi-oracle-core-config"/>
+				<flow-ref name="patch:\orders\(orderId):application\json:sapi-oracle-core-config"/>
+				<flow-ref name="get:\inventory\items:sapi-oracle-core-config"/>
+				<flow-ref name="post:\inventory\movements:application\json:sapi-oracle-core-config"/>
+			</when>
+		</choice>
+	</munit:before-suite>
+
+	<http:request-config name="test-api-client" doc:name="HTTP Request configuration">
+		<http:request-connection host="localhost" port="8091"/>
+	</http:request-config>
+
+	<munit:test name="api_getOrder_ped1002_returns200" description="GET /orders/{orderId} returns 200 with the order">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="sapi-oracle-core-main"/>
+		</munit:enable-flow-sources>
+		<munit:behavior>
+			<munit-tools:mock-when processor="db:select">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="db-select-order"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/java --- readUrl('classpath://payloads/order-1002-rows.json', 'application/json')]" mediaType="application/java"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+		</munit:behavior>
+		<munit:execution>
+			<http:request method="GET" config-ref="test-api-client" path="/api/v1/core/store/orders/10000000-0000-4000-8000-000000001002">
+				<http:headers><![CDATA[#[{ client_id: 'test-id', client_secret: 'test-secret' }]]]></http:headers>
+				<http:response-validator><http:success-status-code-validator values="0..599"/></http:response-validator>
+			</http:request>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(200)]"/>
+			<munit-tools:assert-that expression="#[payload.orderId]" is="#[MunitTools::equalTo('10000000-0000-4000-8000-000000001002')]"/>
+			<munit-tools:assert-that expression="#[payload.status]" is="#[MunitTools::equalTo('CONFIRMED')]"/>
+		</munit:validation>
+	</munit:test>
+
+	<munit:test name="api_getOrder_unknown_returns404" description="An unknown order returns 404 ORDER_NOT_FOUND with the ErrorResponse">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="sapi-oracle-core-main"/>
+		</munit:enable-flow-sources>
+		<munit:behavior>
+			<munit-tools:mock-when processor="db:select">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="db-select-order"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/java --- []]" mediaType="application/java"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+		</munit:behavior>
+		<munit:execution>
+			<http:request method="GET" config-ref="test-api-client" path="/api/v1/core/store/orders/10000000-0000-4000-8000-000000009999">
+				<http:headers><![CDATA[#[{ client_id: 'test-id', client_secret: 'test-secret', 'x-correlation-id': 'corr-404' }]]]></http:headers>
+				<http:response-validator><http:success-status-code-validator values="0..599"/></http:response-validator>
+			</http:request>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(404)]"/>
+			<munit-tools:assert-that expression="#[payload.code]" is="#[MunitTools::equalTo('ORDER_NOT_FOUND')]"/>
+			<munit-tools:assert-that expression="#[payload.retryable]" is="#[MunitTools::equalTo(false)]"/>
+			<munit-tools:assert-that expression="#[payload.timestamp]" is="#[MunitTools::endsWith('Z')]"/>
+		</munit:validation>
+	</munit:test>
+
+	<munit:test name="api_databaseDown_returns503WithRetryAfter" description="With Oracle down it returns a retryable 503 with Retry-After">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="sapi-oracle-core-main"/>
+		</munit:enable-flow-sources>
+		<munit:behavior>
+			<munit-tools:mock-when processor="db:select">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="db-select-order"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:error typeId="DB:CONNECTIVITY"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+		</munit:behavior>
+		<munit:execution>
+			<http:request method="GET" config-ref="test-api-client" path="/api/v1/core/store/orders/10000000-0000-4000-8000-000000001002">
+				<http:headers><![CDATA[#[{ client_id: 'test-id', client_secret: 'test-secret' }]]]></http:headers>
+				<http:response-validator><http:success-status-code-validator values="0..599"/></http:response-validator>
+			</http:request>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(503)]"/>
+			<munit-tools:assert-that expression="#[payload.code]" is="#[MunitTools::equalTo('SERVICE_UNAVAILABLE')]"/>
+			<munit-tools:assert-that expression="#[payload.retryable]" is="#[MunitTools::equalTo(true)]"/>
+			<munit-tools:assert-that expression="#[attributes.headers.'retry-after']" is="#[MunitTools::equalTo('30')]"/>
+		</munit:validation>
+	</munit:test>
+
+	<munit:test name="api_postMovement_overStock_returns409" description="An outbound above stock returns 409 INSUFFICIENT_STOCK">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="sapi-oracle-core-main"/>
+		</munit:enable-flow-sources>
+		<munit:behavior>
+			<munit-tools:mock-when processor="db:select">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="db-select-movement-by-reference"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/java --- []]" mediaType="application/java"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit-tools:mock-when processor="db:update">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="db-update-stock"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:error cause="#[java!java::lang::RuntimeException::new('ORA-02290: check constraint (STORE_APP.CHK_INV_STOCK) violated')]"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+		</munit:behavior>
+		<munit:execution>
+			<http:request method="POST" config-ref="test-api-client" path="/api/v1/core/store/inventory/movements">
+				<http:body><![CDATA[#[output application/json --- { itemId: '20000000-0000-4000-8000-000000000100', 'type': 'OUTBOUND', quantity: 3, reference: 'salida-prueba' }]]]></http:body>
+				<http:headers><![CDATA[#[{ client_id: 'test-id', client_secret: 'test-secret' }]]]></http:headers>
+				<http:response-validator><http:success-status-code-validator values="0..599"/></http:response-validator>
+			</http:request>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(409)]"/>
+			<munit-tools:assert-that expression="#[payload.code]" is="#[MunitTools::equalTo('INSUFFICIENT_STOCK')]"/>
+		</munit:validation>
+	</munit:test>
+
+	<munit:test name="api_postOrder_withoutLines_returns400" description="An order without lines breaks the contract and returns 400 without touching Oracle">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="sapi-oracle-core-main"/>
+		</munit:enable-flow-sources>
+		<munit:execution>
+			<http:request method="POST" config-ref="test-api-client" path="/api/v1/core/store/orders">
+				<http:body><![CDATA[#[output application/json --- { orderId: '10000000-0000-4000-8000-0000000019a1', customerId: '003Hs00000CUMBRAAA', currency: 'MXN', lines: [] }]]]></http:body>
+				<http:headers><![CDATA[#[{ client_id: 'test-id', client_secret: 'test-secret' }]]]></http:headers>
+				<http:response-validator><http:success-status-code-validator values="0..599"/></http:response-validator>
+			</http:request>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(400)]"/>
+			<munit-tools:assert-that expression="#[payload.code]" is="#[MunitTools::equalTo('VALIDATION_ERROR')]"/>
+		</munit:validation>
+	</munit:test>
+
+	<munit:test name="api_customersRemoved_returns404" description="/customers no longer exists in the ERP: returns 404">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="sapi-oracle-core-main"/>
+		</munit:enable-flow-sources>
+		<munit:execution>
+			<http:request method="GET" config-ref="test-api-client" path="/api/v1/core/store/customers">
+				<http:headers><![CDATA[#[{ client_id: 'test-id', client_secret: 'test-secret' }]]]></http:headers>
+				<http:response-validator><http:success-status-code-validator values="0..599"/></http:response-validator>
+			</http:request>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(404)]"/>
+			<munit-tools:assert-that expression="#[payload.code]" is="#[MunitTools::equalTo('RESOURCE_NOT_FOUND')]"/>
+		</munit:validation>
+	</munit:test>
+
+	<munit:test name="api_deleteOrder_returns405" description="A method the contract does not define returns 405">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="sapi-oracle-core-main"/>
+		</munit:enable-flow-sources>
+		<munit:execution>
+			<http:request method="DELETE" config-ref="test-api-client" path="/api/v1/core/store/orders/10000000-0000-4000-8000-000000001002">
+				<http:headers><![CDATA[#[{ client_id: 'test-id', client_secret: 'test-secret' }]]]></http:headers>
+				<http:response-validator><http:success-status-code-validator values="0..599"/></http:response-validator>
+			</http:request>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[attributes.statusCode]" is="#[MunitTools::equalTo(405)]"/>
+		</munit:validation>
+	</munit:test>
+
+</mule>

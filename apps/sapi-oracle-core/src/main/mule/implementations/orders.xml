@@ -1,0 +1,235 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:db="http://www.mulesoft.org/schema/mule/db"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/db http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd
+		http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+	<!-- ERP orders: ORDERS holds the header and status, ORDER_ITEMS holds the lines.
+	     An order is created RECEIVED and moves to CONFIRMED or REJECTED; there is no other path. -->
+
+	<!-- ============================================================ POST /orders -->
+	<flow name="orders-create-flow" doc:name="orders-create-flow"
+		doc:description="Inserts header and lines in one transaction; the order is created RECEIVED and returns 201">
+		<logger level="INFO" message="#[output application/java --- 'INIT - Create order, orderId: ' ++ (payload.orderId default '') ++ ' correlationId: ' ++ correlationId]"
+			doc:name="logger-create-order-start" doc:description="Logs the start of the order creation with the order id"/>
+		<set-variable variableName="orderRequest" value="#[payload]"
+			doc:name="set-order-request" doc:description="Keeps the request for the inserts"/>
+		<choice doc:name="choice-repeated-items" doc:description="Each item may appear only once in the order">
+			<when expression="#[sizeOf(vars.orderRequest.lines distinctBy ((l) -> l.itemId)) != sizeOf(vars.orderRequest.lines)]"
+				doc:name="when-repeated-item" doc:description="An item appears in two lines">
+				<raise-error type="APP:VALIDATION_ERROR" description="An item cannot appear more than once in the order"
+					doc:name="raise-repeated-item" doc:description="Returns 400 without touching Oracle"/>
+			</when>
+		</choice>
+		<try transactionalAction="ALWAYS_BEGIN" transactionType="LOCAL"
+			doc:name="try-create-order-transaction" doc:description="Either the header and all lines are inserted, or nothing is">
+			<db:insert config-ref="oracle-core-db-config" doc:name="db-insert-order"
+				doc:description="Inserts the order header with status RECEIVED">
+				<db:sql><![CDATA[INSERT INTO ORDERS (ID, CUSTOMER_ID, STATUS, CURRENCY) VALUES (:id, :customerId, 'RECEIVED', :currency)]]></db:sql>
+				<db:input-parameters><![CDATA[#[output application/java --- { id: vars.orderRequest.orderId, customerId: vars.orderRequest.customerId, currency: vars.orderRequest.currency }]]]></db:input-parameters>
+			</db:insert>
+			<foreach collection="#[vars.orderRequest.lines]" doc:name="foreach-order-line" doc:description="Inserts each order line">
+				<db:insert config-ref="oracle-core-db-config" doc:name="db-insert-order-item"
+					doc:description="Inserts the line without a price: the price is set on confirmation">
+					<db:sql><![CDATA[INSERT INTO ORDER_ITEMS (ORDER_ID, ITEM_ID, QTY) VALUES (:orderId, :itemId, :qty)]]></db:sql>
+					<db:input-parameters><![CDATA[#[output application/java --- { orderId: vars.orderRequest.orderId, itemId: payload.itemId, qty: payload.quantity }]]]></db:input-parameters>
+				</db:insert>
+			</foreach>
+			<error-handler>
+				<on-error-propagate type="ANY" when="#[(error.description default '') contains 'ORA-00001']"
+					doc:name="on-error-order-already-exists" doc:description="The orderId already exists (PK_ORDERS)">
+					<raise-error type="APP:ORDER_ALREADY_EXISTS" description="An order with this id already exists"
+						doc:name="raise-order-already-exists" doc:description="Returns 409"/>
+				</on-error-propagate>
+				<on-error-propagate type="ANY" when="#[(error.description default '') contains 'ORA-02291']"
+					doc:name="on-error-unknown-item" doc:description="A line points to an item that does not exist in INVENTORY">
+					<raise-error type="APP:VALIDATION_ERROR" description="One or more order items do not exist in the inventory"
+						doc:name="raise-unknown-item" doc:description="Returns 400"/>
+				</on-error-propagate>
+			</error-handler>
+		</try>
+		<set-variable variableName="orderId" value="#[output application/java --- vars.orderRequest.orderId]"
+			doc:name="set-order-id" doc:description="Id used to read the order just created"/>
+		<flow-ref name="orders-load-subflow" doc:name="flow-ref-orders-load" doc:description="Returns the order with its lines and SKUs"/>
+		<set-variable variableName="httpStatus" value="#[201]" doc:name="set-http-status-201" doc:description="Order created"/>
+		<logger level="INFO" message="#[output application/java --- 'END - Create order, orderId: ' ++ vars.orderId ++ ' correlationId: ' ++ correlationId]"
+			doc:name="logger-create-order-end" doc:description="Logs the end of the order creation"/>
+	</flow>
+
+	<!-- ============================================================= GET /orders -->
+	<flow name="orders-list-flow" doc:name="orders-list-flow"
+		doc:description="Lists orders by status and from a date, oldest first, one page at a time">
+		<ee:transform doc:name="transform-list-params" doc:description="Status, from date in UTC and page">
+			<ee:message/>
+			<ee:variables>
+				<ee:set-variable variableName="listParams"><![CDATA[%dw 2.0
+output application/java
+var q = attributes.queryParams default {}
+var size = (q.size default p('paging.defaultSize')) as Number
+var page = (q.page default 1) as Number
+---
+{
+	status: q.status,
+	fromUtc: if (q.from == null) null else (((q.from as DateTime) >> "UTC") as String {format: "yyyyMMddHHmmss"}),
+	pageOffset: (page - 1) * size,
+	pageSize: size
+}]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+		<db:select config-ref="oracle-core-db-config" doc:name="db-select-orders"
+			doc:description="Orders in the page with their lines and the SKU of each item">
+			<db:sql><![CDATA[SELECT o.ID, o.CUSTOMER_ID, o.STATUS, o.CURRENCY, o.TOTAL,
+       TO_CHAR(SYS_EXTRACT_UTC(o.CREATED_AT), 'YYYYMMDDHH24MISS') AS CREATED_AT,
+       TO_CHAR(SYS_EXTRACT_UTC(o.UPDATED_AT), 'YYYYMMDDHH24MISS') AS UPDATED_AT,
+       oi.ITEM_ID, i.SKU, oi.QTY, oi.UNIT_PRICE, oi.PRICE_SOURCE, oi.PRICE_PROVIDER
+  FROM ORDERS o
+  JOIN ORDER_ITEMS oi ON oi.ORDER_ID = o.ID
+  JOIN INVENTORY i ON i.ID = oi.ITEM_ID
+ WHERE o.ID IN (SELECT ID FROM (
+         SELECT ID FROM ORDERS
+          WHERE (:status IS NULL OR STATUS = :status)
+            AND (:fromUtc IS NULL OR SYS_EXTRACT_UTC(CREATED_AT) >= TO_TIMESTAMP(:fromUtc, 'YYYYMMDDHH24MISS'))
+          ORDER BY CREATED_AT, ID
+         OFFSET :pageOffset ROWS FETCH NEXT :pageSize ROWS ONLY))
+ ORDER BY o.CREATED_AT, o.ID, i.SKU]]></db:sql>
+			<db:input-parameters><![CDATA[#[vars.listParams]]]></db:input-parameters>
+		</db:select>
+		<ee:transform doc:name="transform-orders-response" doc:description="Groups the rows by order in the contract format">
+			<ee:message>
+				<ee:set-payload><![CDATA[%dw 2.0
+import toOrders from modules::erp
+output application/json
+---
+toOrders(payload)]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+	</flow>
+
+	<!-- ===================================================== GET /orders/{orderId} -->
+	<flow name="orders-get-flow" doc:name="orders-get-flow" doc:description="Returns one order with its lines">
+		<set-variable variableName="orderId" value="#[attributes.uriParams.orderId]"
+			doc:name="set-order-id" doc:description="Id taken from the path"/>
+		<flow-ref name="orders-load-subflow" doc:name="flow-ref-orders-load" doc:description="Order with its lines, or 404"/>
+	</flow>
+
+	<sub-flow name="orders-load-subflow" doc:name="orders-load-subflow"
+		doc:description="Reads order vars.orderId with its lines; raises ORDER_NOT_FOUND when it does not exist">
+		<db:select config-ref="oracle-core-db-config" doc:name="db-select-order"
+			doc:description="Order header and lines with the SKU of each item">
+			<db:sql><![CDATA[SELECT o.ID, o.CUSTOMER_ID, o.STATUS, o.CURRENCY, o.TOTAL,
+       TO_CHAR(SYS_EXTRACT_UTC(o.CREATED_AT), 'YYYYMMDDHH24MISS') AS CREATED_AT,
+       TO_CHAR(SYS_EXTRACT_UTC(o.UPDATED_AT), 'YYYYMMDDHH24MISS') AS UPDATED_AT,
+       oi.ITEM_ID, i.SKU, oi.QTY, oi.UNIT_PRICE, oi.PRICE_SOURCE, oi.PRICE_PROVIDER
+  FROM ORDERS o
+  JOIN ORDER_ITEMS oi ON oi.ORDER_ID = o.ID
+  JOIN INVENTORY i ON i.ID = oi.ITEM_ID
+ WHERE o.ID = :id
+ ORDER BY i.SKU]]></db:sql>
+			<db:input-parameters><![CDATA[#[output application/java --- { id: vars.orderId }]]]></db:input-parameters>
+		</db:select>
+		<choice doc:name="choice-order-found" doc:description="No rows means the order does not exist">
+			<when expression="#[isEmpty(payload)]" doc:name="when-order-not-found" doc:description="The order is not in ORDERS">
+				<raise-error type="APP:ORDER_NOT_FOUND" description="The order does not exist"
+					doc:name="raise-order-not-found" doc:description="Returns 404"/>
+			</when>
+		</choice>
+		<ee:transform doc:name="transform-order-response" doc:description="Order in the contract format">
+			<ee:message>
+				<ee:set-payload><![CDATA[%dw 2.0
+import toOrders from modules::erp
+output application/json
+---
+toOrders(payload)[0]]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+	</sub-flow>
+
+	<!-- =================================================== PATCH /orders/{orderId} -->
+	<flow name="orders-patch-flow" doc:name="orders-patch-flow"
+		doc:description="Confirms or rejects a RECEIVED order; on confirmation stores prices and the provider last price">
+		<set-variable variableName="orderId" value="#[attributes.uriParams.orderId]"
+			doc:name="set-order-id" doc:description="Id taken from the path"/>
+		<set-variable variableName="statusUpdate" value="#[payload]"
+			doc:name="set-status-update" doc:description="New status, priced lines and reason"/>
+		<choice doc:name="choice-confirm-without-lines" doc:description="Confirming requires the lines with their prices">
+			<when expression="#[vars.statusUpdate.status == 'CONFIRMED' and isEmpty(vars.statusUpdate.lines default [])]"
+				doc:name="when-missing-lines" doc:description="Incomplete confirmation">
+				<raise-error type="APP:VALIDATION_ERROR" description="To confirm the order, send its lines with prices"
+					doc:name="raise-missing-lines" doc:description="Returns 400"/>
+			</when>
+		</choice>
+		<try transactionalAction="ALWAYS_BEGIN" transactionType="LOCAL"
+			doc:name="try-status-update-transaction" doc:description="Status, prices, last price and total in a single transaction">
+			<db:update config-ref="oracle-core-db-config" doc:name="db-update-order-status"
+				doc:description="Changes the status only while the order is still RECEIVED (avoids races)">
+				<db:sql><![CDATA[UPDATE ORDERS
+   SET STATUS = :status,
+       STATUS_REASON = :reason,
+       CONFIRMED_AT = CASE WHEN :status = 'CONFIRMED' THEN SYSTIMESTAMP ELSE NULL END,
+       UPDATED_AT = SYSTIMESTAMP
+ WHERE ID = :id AND STATUS = 'RECEIVED']]></db:sql>
+				<db:input-parameters><![CDATA[#[output application/java --- { id: vars.orderId, status: vars.statusUpdate.status, reason: vars.statusUpdate.reason }]]]></db:input-parameters>
+			</db:update>
+			<choice doc:name="choice-status-updated" doc:description="No updated rows means the order does not exist or is no longer RECEIVED">
+				<when expression="#[payload.affectedRows == 0]" doc:name="when-not-updated" doc:description="Tells 404 apart from 409">
+					<db:select config-ref="oracle-core-db-config" doc:name="db-select-order-exists"
+						doc:description="Checks whether the order exists">
+						<db:sql><![CDATA[SELECT COUNT(*) AS TOTAL FROM ORDERS WHERE ID = :id]]></db:sql>
+						<db:input-parameters><![CDATA[#[output application/java --- { id: vars.orderId }]]]></db:input-parameters>
+					</db:select>
+					<choice doc:name="choice-order-exists" doc:description="404 when it does not exist, 409 when it is no longer RECEIVED">
+						<when expression="#[(payload[0].TOTAL as Number) == 0]" doc:name="when-order-missing" doc:description="The order is not in ORDERS">
+							<raise-error type="APP:ORDER_NOT_FOUND" description="The order does not exist"
+								doc:name="raise-patch-order-not-found" doc:description="Returns 404"/>
+						</when>
+						<otherwise doc:name="otherwise-not-received" doc:description="Only a RECEIVED order can change status">
+							<raise-error type="APP:INVALID_TRANSITION" description="The order is not RECEIVED: only a RECEIVED order can be confirmed or rejected"
+								doc:name="raise-invalid-transition" doc:description="Returns 409"/>
+						</otherwise>
+					</choice>
+				</when>
+			</choice>
+			<choice doc:name="choice-is-confirmation" doc:description="Prices and total are stored only on confirmation">
+				<when expression="#[vars.statusUpdate.status == 'CONFIRMED']" doc:name="when-confirmed" doc:description="Price of each line">
+					<foreach collection="#[vars.statusUpdate.lines]" doc:name="foreach-priced-line" doc:description="Stores price, source and provider">
+						<db:update config-ref="oracle-core-db-config" doc:name="db-update-order-item-price"
+							doc:description="Stores the line unit price, its source and the provider">
+							<db:sql><![CDATA[UPDATE ORDER_ITEMS SET UNIT_PRICE = :unitPrice, PRICE_SOURCE = :priceSource, PRICE_PROVIDER = :provider
+ WHERE ORDER_ID = :orderId AND ITEM_ID = :itemId]]></db:sql>
+							<db:input-parameters><![CDATA[#[output application/java --- { orderId: vars.orderId, itemId: payload.itemId, unitPrice: payload.unitPrice, priceSource: payload.priceSource, provider: payload.provider }]]]></db:input-parameters>
+						</db:update>
+						<choice doc:name="choice-line-in-order" doc:description="The line must exist in the order">
+							<when expression="#[payload.affectedRows == 0]" doc:name="when-line-not-in-order" doc:description="The item is not in the order">
+								<raise-error type="APP:VALIDATION_ERROR" description="A line does not belong to the order"
+									doc:name="raise-line-not-in-order" doc:description="Returns 400 and rolls everything back"/>
+							</when>
+						</choice>
+						<choice doc:name="choice-has-provider" doc:description="The last price is stored only when the price came from a provider">
+							<when expression="#[vars.counter != null and (vars.statusUpdate.lines[vars.counter - 1].provider != null)]"
+								doc:name="when-has-provider" doc:description="Stores the last price of the provider used">
+								<db:update config-ref="oracle-core-db-config" doc:name="db-update-provider-last-price"
+									doc:description="Stores the last confirmed price of the provider used">
+									<db:sql><![CDATA[UPDATE INVENTORY_PROVIDERS SET LAST_PRICE = :price, LAST_PRICE_AT = SYSTIMESTAMP
+ WHERE ITEM_ID = :itemId AND PROVIDER_ABV = :provider]]></db:sql>
+									<db:input-parameters><![CDATA[#[output application/java --- do { var line = vars.statusUpdate.lines[vars.counter - 1] --- { itemId: line.itemId, provider: line.provider, price: line.unitPrice } }]]]></db:input-parameters>
+								</db:update>
+							</when>
+						</choice>
+					</foreach>
+					<db:update config-ref="oracle-core-db-config" doc:name="db-update-order-total"
+						doc:description="Computes the order total from the stored prices">
+						<db:sql><![CDATA[UPDATE ORDERS SET TOTAL = (SELECT SUM(QTY * UNIT_PRICE) FROM ORDER_ITEMS WHERE ORDER_ID = :id) WHERE ID = :id]]></db:sql>
+						<db:input-parameters><![CDATA[#[output application/java --- { id: vars.orderId }]]]></db:input-parameters>
+					</db:update>
+				</when>
+			</choice>
+		</try>
+		<flow-ref name="orders-load-subflow" doc:name="flow-ref-orders-load" doc:description="Returns the order with its new status"/>
+	</flow>
+
+</mule>
