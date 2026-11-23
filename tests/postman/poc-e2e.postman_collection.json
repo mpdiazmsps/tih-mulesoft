@@ -1,0 +1,1060 @@
+{
+  "info": {
+    "_postman_id": "7c3e2a1b-5d4f-4e6a-9b8c-0d1e2f3a4b5c",
+    "name": "PoC agéntica · cuatro escenas",
+    "description": "Las cuatro escenas del guion de punta a punta en local (tarea 25): la tienda por la xapi, el agente por MCP (JSON-RPC sobre streamable HTTP) y la aprobación con la aplicación del aprobador. Las carpetas se corren en orden con tests/run-e2e, que intercala los comandos de demo/control (cambio de segmento y fallas). Sin secretos: en local los client_id son de ejemplo.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "00 Calentamiento",
+      "description": "Abre las conexiones de cada fuente para que la primera consulta del guion no pague el arranque en frío. Sin aserciones de contenido.",
+      "item": [
+        {
+          "name": "Bandeja (calentamiento)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "pm.environment.unset('e2eRequestId');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "client_id",
+                "value": "{{storeClientId}}"
+              },
+              {
+                "key": "client_secret",
+                "value": "{{clientSecret}}"
+              },
+              {
+                "key": "x-correlation-id",
+                "value": "e2e-{{$guid}}"
+              }
+            ],
+            "url": "{{xapiUrl}}/orders/exceptions"
+          }
+        },
+        {
+          "name": "Pedido 360 de PED-1002 (calentamiento)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "client_id",
+                "value": "{{storeClientId}}"
+              },
+              {
+                "key": "client_secret",
+                "value": "{{clientSecret}}"
+              },
+              {
+                "key": "x-correlation-id",
+                "value": "e2e-{{$guid}}"
+              }
+            ],
+            "url": "{{xapiUrl}}/orders/10000000-0000-4000-8000-000000001002"
+          }
+        },
+        {
+          "name": "Pedido 360 de PED-1003 (calentamiento)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "client_id",
+                "value": "{{storeClientId}}"
+              },
+              {
+                "key": "client_secret",
+                "value": "{{clientSecret}}"
+              },
+              {
+                "key": "x-correlation-id",
+                "value": "e2e-{{$guid}}"
+              }
+            ],
+            "url": "{{xapiUrl}}/orders/10000000-0000-4000-8000-000000001003"
+          }
+        }
+      ]
+    },
+    {
+      "name": "E1 Qué requiere mi atención",
+      "description": "Escena 1: la bandeja de pedidos en riesgo, primero los clientes estratégicos. La tienda (xapi) y el agente (MCP) ven la misma lista.",
+      "item": [
+        {
+          "name": "Pedidos en riesgo (tienda)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "pm.test('menos de 3 s', () => pm.expect(pm.response.responseTime).to.be.below(3000));",
+                  "const b = pm.response.json();",
+                  "pm.test('bandeja en orden: 1002, 1004, 1001, 1005', () => pm.expect(b.map(e => e.orderId.slice(-4))).to.eql(['1002', '1004', '1001', '1005']));",
+                  "pm.test('tipos de excepción', () => pm.expect(b.map(e => e.type)).to.eql(['STOCK_SHORTAGE', 'DISPATCH_REJECTED', 'UNCONFIRMED', 'STOCK_SHORTAGE']));",
+                  "pm.test('estratégicos primero', () => pm.expect(b.map(e => e.customer.segment)).to.eql(['STRATEGIC', 'STRATEGIC', 'REGULAR', 'REGULAR']));",
+                  "pm.test('PED-1003 no aparece (sin excepción)', () => pm.expect(b.map(e => e.orderId)).to.not.include('10000000-0000-4000-8000-000000001003'));",
+                  "pm.test('PED-1004: Dirección incorrecta', () => pm.expect(b[1].detail).to.eql('Dirección incorrecta'));",
+                  "pm.environment.set('e2eInbox', JSON.stringify(b.map(e => e.orderId)));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "client_id",
+                "value": "{{storeClientId}}"
+              },
+              {
+                "key": "client_secret",
+                "value": "{{clientSecret}}"
+              },
+              {
+                "key": "x-correlation-id",
+                "value": "e2e-{{$guid}}"
+              }
+            ],
+            "url": "{{xapiUrl}}/orders/exceptions"
+          }
+        },
+        {
+          "name": "Agente: abre sesión MCP",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "pm.test('servidor mcp-online-store', () => pm.expect(pm.response.json().result.serverInfo.name).to.eql('mcp-online-store'));",
+                  "const sid = pm.response.headers.get('mcp-session-id');",
+                  "pm.test('sesión MCP', () => pm.expect(sid).to.be.a('string').and.not.empty);",
+                  "pm.environment.set('mcpSessionId', sid);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              },
+              {
+                "key": "client_id",
+                "value": "{{agentClientId}}"
+              }
+            ],
+            "url": "{{mcpUrl}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"initialize\",\n  \"params\": {\n    \"protocolVersion\": \"2025-06-18\",\n    \"capabilities\": {},\n    \"clientInfo\": {\n      \"name\": \"poc-e2e\",\n      \"version\": \"1.0.0\"\n    }\n  }\n}"
+            }
+          }
+        },
+        {
+          "name": "Agente: confirma la inicialización",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('202', () => pm.response.to.have.status(202));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              },
+              {
+                "key": "client_id",
+                "value": "{{agentClientId}}"
+              },
+              {
+                "key": "Mcp-Session-Id",
+                "value": "{{mcpSessionId}}"
+              },
+              {
+                "key": "MCP-Protocol-Version",
+                "value": "2025-06-18"
+              }
+            ],
+            "url": "{{mcpUrl}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"notifications/initialized\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Agente: tools/list",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const t = pm.response.json().result.tools.map(x => x.name).sort();",
+                  "pm.test('cinco herramientas', () => pm.expect(t).to.eql(['get_order', 'get_request', 'list_exceptions', 'propose_alternatives', 'request_correction']));",
+                  "pm.test('ninguna aprueba ni aplica', () => pm.expect(t.filter(n => /approve|reject|apply/.test(n))).to.be.empty);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              },
+              {
+                "key": "client_id",
+                "value": "{{agentClientId}}"
+              },
+              {
+                "key": "Mcp-Session-Id",
+                "value": "{{mcpSessionId}}"
+              },
+              {
+                "key": "MCP-Protocol-Version",
+                "value": "2025-06-18"
+              }
+            ],
+            "url": "{{mcpUrl}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 2,\n  \"method\": \"tools/list\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Agente: list_exceptions",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const rpc = pm.response.json();",
+                  "pm.test('JSON-RPC sin error', () => pm.expect(rpc.error, JSON.stringify(rpc.error)).to.be.undefined);",
+                  "const result = rpc.result || {};",
+                  "const tool = result.content && result.content[0] ? JSON.parse(result.content[0].text) : null;",
+                  "pm.test('la misma bandeja que la tienda', () => pm.expect(tool.map(e => e.orderId)).to.eql(JSON.parse(pm.environment.get('e2eInbox'))));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              },
+              {
+                "key": "client_id",
+                "value": "{{agentClientId}}"
+              },
+              {
+                "key": "Mcp-Session-Id",
+                "value": "{{mcpSessionId}}"
+              },
+              {
+                "key": "MCP-Protocol-Version",
+                "value": "2025-06-18"
+              }
+            ],
+            "url": "{{mcpUrl}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 3,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"list_exceptions\",\n    \"arguments\": {\n      \"limit\": 20\n    }\n  }\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "E2a Qué hago con este pedido",
+      "description": "Escena 2: el Pedido 360 de PED-1002 compuesto al consultar, con las tres cotizaciones y la de C (BOR) como la más barata.",
+      "item": [
+        {
+          "name": "Pedido 360 de PED-1002 (tienda)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "pm.test('menos de 3 s', () => pm.expect(pm.response.responseTime).to.be.below(3000));",
+                  "const o = pm.response.json();",
+                  "pm.test('PED-1002 confirmado, de Constructora Cumbres', () => { pm.expect(o.status).to.eql('CONFIRMED'); pm.expect(o.customer.name).to.eql('Constructora Cumbres'); });",
+                  "pm.test('SKU-100: pide 5, hay 2', () => { pm.expect(o.lines[0].sku).to.eql('SKU-100'); pm.expect(o.lines[0].ordered).to.eql(5); pm.expect(o.lines[0].available).to.eql(2); });",
+                  "pm.test('remisión en espera', () => pm.expect(o.dispatchNote.status).to.eql('ON_HOLD'));",
+                  "pm.test('faltante de inventario', () => pm.expect(o.exceptions).to.include('STOCK_SHORTAGE'));",
+                  "const q = Object.fromEntries(o.alternatives.map(a => [a.provider, a.price]));",
+                  "pm.test('3 cotizaciones: A 189, B 194, C 175', () => pm.expect(q).to.eql({ FAK: 189, ESC: 194, BOR: 175 }));",
+                  "pm.test('C (BOR) la más barata', () => pm.expect(o.alternatives.find(a => a.cheapest).provider).to.eql('BOR'));",
+                  "pm.test('todas las fuentes respondieron', () => pm.expect(o.sources).to.eql({ erp: 'OK', crm: 'OK', logistics: 'OK', providers: '3 of 3' }));",
+                  "pm.test('segmento STRATEGIC, leído de Salesforce al consultar', () => pm.expect(pm.response.json().customer.segment).to.eql('STRATEGIC'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "client_id",
+                "value": "{{storeClientId}}"
+              },
+              {
+                "key": "client_secret",
+                "value": "{{clientSecret}}"
+              },
+              {
+                "key": "x-correlation-id",
+                "value": "e2e-{{$guid}}"
+              }
+            ],
+            "url": "{{xapiUrl}}/orders/10000000-0000-4000-8000-000000001002"
+          }
+        },
+        {
+          "name": "Alternativas de PED-1002 (tienda)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "const a = pm.response.json();",
+                  "pm.test('reponer 3 de SKU-100 con C a 175.00', () => pm.expect(a.cheapest).to.include({ type: 'RESTOCK', sku: 'SKU-100', quantity: 3, provider: 'BOR', price: 175 }));",
+                  "pm.test('3 de 3 proveedores', () => pm.expect(a.providers).to.eql('3 of 3'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "client_id",
+                "value": "{{storeClientId}}"
+              },
+              {
+                "key": "client_secret",
+                "value": "{{clientSecret}}"
+              },
+              {
+                "key": "x-correlation-id",
+                "value": "e2e-{{$guid}}"
+              }
+            ],
+            "url": "{{xapiUrl}}/orders/10000000-0000-4000-8000-000000001002/alternatives"
+          }
+        },
+        {
+          "name": "Agente: get_order PED-1002",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const rpc = pm.response.json();",
+                  "pm.test('JSON-RPC sin error', () => pm.expect(rpc.error, JSON.stringify(rpc.error)).to.be.undefined);",
+                  "const result = rpc.result || {};",
+                  "const tool = result.content && result.content[0] ? JSON.parse(result.content[0].text) : null;",
+                  "pm.test('el mismo Pedido 360 que la tienda', () => { pm.expect(tool.customer.segment).to.eql('STRATEGIC'); pm.expect(tool.sources.providers).to.eql('3 of 3'); pm.expect(tool.alternatives.find(a => a.cheapest).provider).to.eql('BOR'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              },
+              {
+                "key": "client_id",
+                "value": "{{agentClientId}}"
+              },
+              {
+                "key": "Mcp-Session-Id",
+                "value": "{{mcpSessionId}}"
+              },
+              {
+                "key": "MCP-Protocol-Version",
+                "value": "2025-06-18"
+              }
+            ],
+            "url": "{{mcpUrl}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 4,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"get_order\",\n    \"arguments\": {\n      \"orderId\": \"10000000-0000-4000-8000-000000001002\"\n    }\n  }\n}"
+            }
+          }
+        },
+        {
+          "name": "Agente: propose_alternatives PED-1002",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const rpc = pm.response.json();",
+                  "pm.test('JSON-RPC sin error', () => pm.expect(rpc.error, JSON.stringify(rpc.error)).to.be.undefined);",
+                  "const result = rpc.result || {};",
+                  "const tool = result.content && result.content[0] ? JSON.parse(result.content[0].text) : null;",
+                  "pm.test('propone C a 175.00', () => pm.expect(tool.cheapest).to.include({ provider: 'BOR', price: 175 }));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              },
+              {
+                "key": "client_id",
+                "value": "{{agentClientId}}"
+              },
+              {
+                "key": "Mcp-Session-Id",
+                "value": "{{mcpSessionId}}"
+              },
+              {
+                "key": "MCP-Protocol-Version",
+                "value": "2025-06-18"
+              }
+            ],
+            "url": "{{mcpUrl}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 5,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"propose_alternatives\",\n    \"arguments\": {\n      \"orderId\": \"10000000-0000-4000-8000-000000001002\"\n    }\n  }\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "E2b Cambio en Salesforce",
+      "description": "Correr después de demo/control cumbres-regular: el pedido refleja el segmento nuevo sin copiar ni sincronizar.",
+      "item": [
+        {
+          "name": "Pedido 360 de PED-1002 con Cumbres en Regular",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "pm.test('segmento REGULAR, leído de Salesforce al consultar', () => pm.expect(pm.response.json().customer.segment).to.eql('REGULAR'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "client_id",
+                "value": "{{storeClientId}}"
+              },
+              {
+                "key": "client_secret",
+                "value": "{{clientSecret}}"
+              },
+              {
+                "key": "x-correlation-id",
+                "value": "e2e-{{$guid}}"
+              }
+            ],
+            "url": "{{xapiUrl}}/orders/10000000-0000-4000-8000-000000001002"
+          }
+        }
+      ]
+    },
+    {
+      "name": "E2c Segmento restaurado",
+      "description": "Correr después de demo/control cumbres-strategic.",
+      "item": [
+        {
+          "name": "Pedido 360 de PED-1002 con Cumbres en Estratégico",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "pm.test('segmento STRATEGIC, leído de Salesforce al consultar', () => pm.expect(pm.response.json().customer.segment).to.eql('STRATEGIC'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "client_id",
+                "value": "{{storeClientId}}"
+              },
+              {
+                "key": "client_secret",
+                "value": "{{clientSecret}}"
+              },
+              {
+                "key": "x-correlation-id",
+                "value": "e2e-{{$guid}}"
+              }
+            ],
+            "url": "{{xapiUrl}}/orders/10000000-0000-4000-8000-000000001002"
+          }
+        }
+      ]
+    },
+    {
+      "name": "E3 Y si un sistema falla",
+      "description": "Escena 3. Correr después de demo/control slow-c y sftp-down: la respuesta llega a tiempo y dice qué le falta. Una sola consulta por canal, para no abrir los circuitos.",
+      "item": [
+        {
+          "name": "Pedido 360 de PED-1002 con logística caída y C lento (tienda)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "pm.test('menos de 3 s', () => pm.expect(pm.response.responseTime).to.be.below(3000));",
+                  "const o = pm.response.json();",
+                  "pm.test('ERP y CRM responden', () => { pm.expect(o.sources.erp).to.eql('OK'); pm.expect(o.sources.crm).to.eql('OK'); });",
+                  "pm.test('logística no disponible y la remisión desconocida', () => { pm.expect(o.sources.logistics).to.eql('UNAVAILABLE'); pm.expect(o.dispatchNote.status).to.eql('UNKNOWN'); });",
+                  "pm.test('2 de 3 cotizaciones (falta C)', () => { pm.expect(o.sources.providers).to.eql('2 of 3'); pm.expect(o.alternatives.map(a => a.provider)).to.not.include('BOR'); });",
+                  "pm.test('el resto del pedido llega completo', () => { pm.expect(o.customer.name).to.eql('Constructora Cumbres'); pm.expect(o.lines[0].available).to.eql(2); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "client_id",
+                "value": "{{storeClientId}}"
+              },
+              {
+                "key": "client_secret",
+                "value": "{{clientSecret}}"
+              },
+              {
+                "key": "x-correlation-id",
+                "value": "e2e-{{$guid}}"
+              }
+            ],
+            "url": "{{xapiUrl}}/orders/10000000-0000-4000-8000-000000001002"
+          }
+        },
+        {
+          "name": "Agente: get_order PED-1002 con las fallas",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const rpc = pm.response.json();",
+                  "pm.test('JSON-RPC sin error', () => pm.expect(rpc.error, JSON.stringify(rpc.error)).to.be.undefined);",
+                  "const result = rpc.result || {};",
+                  "const tool = result.content && result.content[0] ? JSON.parse(result.content[0].text) : null;",
+                  "pm.test('el agente ve lo mismo: qué falta', () => { pm.expect(tool.sources.logistics).to.eql('UNAVAILABLE'); pm.expect(tool.sources.providers).to.eql('2 of 3'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              },
+              {
+                "key": "client_id",
+                "value": "{{agentClientId}}"
+              },
+              {
+                "key": "Mcp-Session-Id",
+                "value": "{{mcpSessionId}}"
+              },
+              {
+                "key": "MCP-Protocol-Version",
+                "value": "2025-06-18"
+              }
+            ],
+            "url": "{{mcpUrl}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 6,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"get_order\",\n    \"arguments\": {\n      \"orderId\": \"10000000-0000-4000-8000-000000001002\"\n    }\n  }\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "E4a El agente solicita",
+      "description": "Escena 4: el agente propone reponer con el proveedor más barato, dos veces por error. Queda una sola solicitud PENDING.",
+      "item": [
+        {
+          "name": "Agente: request_correction PED-1002 RESTOCK",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const rpc = pm.response.json();",
+                  "pm.test('JSON-RPC sin error', () => pm.expect(rpc.error, JSON.stringify(rpc.error)).to.be.undefined);",
+                  "const result = rpc.result || {};",
+                  "const tool = result.content && result.content[0] ? JSON.parse(result.content[0].text) : null;",
+                  "pm.test('solicitud PENDING: 3 de SKU-100 con C a 175.00', () => { pm.expect(tool.status).to.eql('PENDING'); pm.expect(tool.detail).to.include({ quantity: 3, provider: 'BOR', price: 175 }); });",
+                  "pm.test('pedida por el agente', () => pm.expect(tool.requestedBy).to.eql(pm.environment.get('agentClientId')));",
+                  "pm.test('llave derivada del pedido, el tipo y el proveedor', () => pm.expect(tool.idempotencyKey).to.eql('10000000-0000-4000-8000-000000001002:RESTOCK:BOR'));",
+                  "pm.environment.set('e2eRequestId', tool.requestId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              },
+              {
+                "key": "client_id",
+                "value": "{{agentClientId}}"
+              },
+              {
+                "key": "Mcp-Session-Id",
+                "value": "{{mcpSessionId}}"
+              },
+              {
+                "key": "MCP-Protocol-Version",
+                "value": "2025-06-18"
+              }
+            ],
+            "url": "{{mcpUrl}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 7,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"request_correction\",\n    \"arguments\": {\n      \"orderId\": \"10000000-0000-4000-8000-000000001002\",\n      \"type\": \"RESTOCK\"\n    }\n  }\n}"
+            }
+          }
+        },
+        {
+          "name": "Agente: request_correction otra vez (por error)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const rpc = pm.response.json();",
+                  "pm.test('JSON-RPC sin error', () => pm.expect(rpc.error, JSON.stringify(rpc.error)).to.be.undefined);",
+                  "const result = rpc.result || {};",
+                  "const tool = result.content && result.content[0] ? JSON.parse(result.content[0].text) : null;",
+                  "pm.test('devuelve la primera solicitud', () => pm.expect(tool.requestId).to.eql(pm.environment.get('e2eRequestId')));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              },
+              {
+                "key": "client_id",
+                "value": "{{agentClientId}}"
+              },
+              {
+                "key": "Mcp-Session-Id",
+                "value": "{{mcpSessionId}}"
+              },
+              {
+                "key": "MCP-Protocol-Version",
+                "value": "2025-06-18"
+              }
+            ],
+            "url": "{{mcpUrl}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 8,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"request_correction\",\n    \"arguments\": {\n      \"orderId\": \"10000000-0000-4000-8000-000000001002\",\n      \"type\": \"RESTOCK\"\n    }\n  }\n}"
+            }
+          }
+        },
+        {
+          "name": "Solicitudes por aprobar (vista del aprobador)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "const mine = pm.response.json().filter(x => x.orderId === '10000000-0000-4000-8000-000000001002');",
+                  "pm.test('una sola solicitud PENDING de PED-1002', () => pm.expect(mine.length).to.eql(1));",
+                  "const asked = pm.environment.get('e2eRequestId');",
+                  "if (asked) pm.test('es la que pidió el agente', () => pm.expect(mine[0].requestId).to.eql(asked));",
+                  "// Si la pidió un agente fuera de Postman (por ejemplo Claude), E4b aprueba la de esta lista.",
+                  "if (mine.length) pm.environment.set('e2eRequestId', mine[0].requestId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "client_id",
+                "value": "{{approverClientId}}"
+              },
+              {
+                "key": "client_secret",
+                "value": "{{clientSecret}}"
+              },
+              {
+                "key": "x-correlation-id",
+                "value": "e2e-{{$guid}}"
+              }
+            ],
+            "url": "{{xapiUrl}}/order-requests?status=PENDING"
+          }
+        }
+      ]
+    },
+    {
+      "name": "E4b La persona decide",
+      "description": "El agente no puede aprobar; el aprobador, con otra aplicación cliente, aprueba una sola vez.",
+      "item": [
+        {
+          "name": "El agente intenta aprobar",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('403 FORBIDDEN', () => { pm.response.to.have.status(403); pm.expect(pm.response.json().code).to.eql('FORBIDDEN'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "client_id",
+                "value": "{{agentClientId}}"
+              },
+              {
+                "key": "client_secret",
+                "value": "{{clientSecret}}"
+              },
+              {
+                "key": "x-correlation-id",
+                "value": "e2e-{{$guid}}"
+              }
+            ],
+            "url": "{{xapiUrl}}/order-requests/{{e2eRequestId}}/approve"
+          }
+        },
+        {
+          "name": "El aprobador aprueba",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.test('COMPLETED', () => pm.expect(r.status).to.eql('COMPLETED'));",
+                  "pm.test('decidida por el aprobador', () => pm.expect(r.decidedBy).to.eql(pm.environment.get('approverClientId')));",
+                  "pm.test('cada paso registrado con quién y cuándo', () => { pm.expect(r.history.map(h => h.status)).to.eql(['PENDING', 'APPROVED', 'APPLYING', 'COMPLETED']); r.history.forEach(h => { pm.expect(h.actor).to.be.a('string').and.not.empty; pm.expect(h.at).to.be.a('string').and.not.empty; }); });",
+                  "pm.test('remisión emitida', () => pm.expect(r.history[3].note).to.include('10000000-0000-4000-8000-000000001002-'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "client_id",
+                "value": "{{approverClientId}}"
+              },
+              {
+                "key": "client_secret",
+                "value": "{{clientSecret}}"
+              },
+              {
+                "key": "x-correlation-id",
+                "value": "e2e-{{$guid}}"
+              }
+            ],
+            "url": "{{xapiUrl}}/order-requests/{{e2eRequestId}}/approve"
+          }
+        },
+        {
+          "name": "El aprobador aprueba otra vez",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('409: no se aplica dos veces', () => { pm.response.to.have.status(409); pm.expect(pm.response.json().code).to.eql('INVALID_TRANSITION'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "client_id",
+                "value": "{{approverClientId}}"
+              },
+              {
+                "key": "client_secret",
+                "value": "{{clientSecret}}"
+              },
+              {
+                "key": "x-correlation-id",
+                "value": "e2e-{{$guid}}"
+              }
+            ],
+            "url": "{{xapiUrl}}/order-requests/{{e2eRequestId}}/approve"
+          }
+        }
+      ]
+    },
+    {
+      "name": "E4c Stock repuesto y remisión emitida",
+      "description": "El resultado: el stock se repuso y se consumió una sola vez, la remisión salió y el agente ve la solicitud completada. El correo al cliente se revisa en la bandeja de notifications.redirectTo.",
+      "item": [
+        {
+          "name": "Catálogo (stock de SKU-100)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "const p = pm.response.json().find(x => x.sku === 'SKU-100');",
+                  "pm.test('SKU-100: 2 + 3 repuestos - 5 despachados = 0', () => pm.expect(p.stock).to.eql(0));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "client_id",
+                "value": "{{storeClientId}}"
+              },
+              {
+                "key": "client_secret",
+                "value": "{{clientSecret}}"
+              },
+              {
+                "key": "x-correlation-id",
+                "value": "e2e-{{$guid}}"
+              }
+            ],
+            "url": "{{xapiUrl}}/products"
+          }
+        },
+        {
+          "name": "Pedido 360 de PED-1002 después de la corrección",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "const o = pm.response.json();",
+                  "pm.test('sin faltante', () => pm.expect(o.exceptions).to.not.include('STOCK_SHORTAGE'));",
+                  "pm.test('remisión emitida', () => pm.expect(o.dispatchNote.dispatchNoteId).to.eql('10000000-0000-4000-8000-000000001002-1'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "client_id",
+                "value": "{{storeClientId}}"
+              },
+              {
+                "key": "client_secret",
+                "value": "{{clientSecret}}"
+              },
+              {
+                "key": "x-correlation-id",
+                "value": "e2e-{{$guid}}"
+              }
+            ],
+            "url": "{{xapiUrl}}/orders/10000000-0000-4000-8000-000000001002"
+          }
+        },
+        {
+          "name": "Agente: get_request",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const rpc = pm.response.json();",
+                  "pm.test('JSON-RPC sin error', () => pm.expect(rpc.error, JSON.stringify(rpc.error)).to.be.undefined);",
+                  "const result = rpc.result || {};",
+                  "const tool = result.content && result.content[0] ? JSON.parse(result.content[0].text) : null;",
+                  "pm.test('el agente ve la solicitud COMPLETED', () => pm.expect(tool.status).to.eql('COMPLETED'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              },
+              {
+                "key": "client_id",
+                "value": "{{agentClientId}}"
+              },
+              {
+                "key": "Mcp-Session-Id",
+                "value": "{{mcpSessionId}}"
+              },
+              {
+                "key": "MCP-Protocol-Version",
+                "value": "2025-06-18"
+              }
+            ],
+            "url": "{{mcpUrl}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 9,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"get_request\",\n    \"arguments\": {\n      \"requestId\": \"{{e2eRequestId}}\"\n    }\n  }\n}"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

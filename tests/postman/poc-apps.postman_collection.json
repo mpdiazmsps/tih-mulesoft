@@ -1,0 +1,536 @@
+{
+  "info": {
+    "_postman_id": "5d41d012-da55-4049-b695-efd38c9e53d9",
+    "name": "PoC agéntica · apps",
+    "description": "Verificación en vivo de cada app (una carpeta por app). Correr con newman: npx --yes newman@6 run tests/postman/poc-apps.postman_collection.json --folder <app> -e tests/postman/local.postman_environment.json",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "sapi-oracle-core",
+      "description": "Tarea 11. Correr después de infra/scripts/reset-data (los movimientos cambian el stock de SKU-100).",
+      "item": [
+        {
+          "name": "Los 5 pedidos del guion",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('5 pedidos', () => pm.expect(b.length).to.eql(5));",
+                  "const st = Object.fromEntries(b.map(o => [o.orderId.slice(-4), o.status]));",
+                  "pm.test('estados del guion', () => pm.expect(st).to.eql({ '1001': 'RECEIVED', '1002': 'CONFIRMED', '1003': 'CONFIRMED', '1004': 'CONFIRMED', '1005': 'CONFIRMED' }));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "client_id",
+                "value": "{{clientId}}"
+              },
+              {
+                "key": "client_secret",
+                "value": "{{clientSecret}}"
+              },
+              {
+                "key": "x-correlation-id",
+                "value": "{{$guid}}"
+              }
+            ],
+            "url": {
+              "raw": "{{sapiOracleCoreUrl}}/orders",
+              "host": [
+                "{{sapiOracleCoreUrl}}"
+              ],
+              "path": [
+                "orders"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Pedidos CONFIRMED",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('4 confirmados', () => pm.expect(pm.response.json().length).to.eql(4));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "client_id",
+                "value": "{{clientId}}"
+              },
+              {
+                "key": "client_secret",
+                "value": "{{clientSecret}}"
+              },
+              {
+                "key": "x-correlation-id",
+                "value": "{{$guid}}"
+              }
+            ],
+            "url": {
+              "raw": "{{sapiOracleCoreUrl}}/orders?status=CONFIRMED",
+              "host": [
+                "{{sapiOracleCoreUrl}}"
+              ],
+              "path": [
+                "orders"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "CONFIRMED"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "PED-1002 con su línea",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const b = pm.response.json();",
+                  "pm.test('CONFIRMED, 5 de SKU-100 a 189 de FAK, total 945', () => { pm.expect(b.status).to.eql('CONFIRMED'); pm.expect(b.lines[0]).to.include({ sku: 'SKU-100', quantity: 5, unitPrice: 189, provider: 'FAK' }); pm.expect(b.total).to.eql(945); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "client_id",
+                "value": "{{clientId}}"
+              },
+              {
+                "key": "client_secret",
+                "value": "{{clientSecret}}"
+              },
+              {
+                "key": "x-correlation-id",
+                "value": "{{$guid}}"
+              }
+            ],
+            "url": {
+              "raw": "{{sapiOracleCoreUrl}}/orders/10000000-0000-4000-8000-000000001002",
+              "host": [
+                "{{sapiOracleCoreUrl}}"
+              ],
+              "path": [
+                "orders",
+                "10000000-0000-4000-8000-000000001002"
+              ]
+            }
+          }
+        },
+        {
+          "name": "SKU-100 con stock 2 y FAK preferente",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const it = pm.response.json()[0];",
+                  "pm.test('stock 2', () => pm.expect(it.stock).to.eql(2));",
+                  "pm.test('3 proveedores', () => pm.expect(it.providers.length).to.eql(3));",
+                  "const pref = it.providers.filter(p => p.preferred);",
+                  "pm.test('un solo preferente: FAK con 189', () => { pm.expect(pref.length).to.eql(1); pm.expect(pref[0]).to.include({ abv: 'FAK', lastPrice: 189 }); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "client_id",
+                "value": "{{clientId}}"
+              },
+              {
+                "key": "client_secret",
+                "value": "{{clientSecret}}"
+              },
+              {
+                "key": "x-correlation-id",
+                "value": "{{$guid}}"
+              }
+            ],
+            "url": {
+              "raw": "{{sapiOracleCoreUrl}}/inventory/items?ids=20000000-0000-4000-8000-000000000100",
+              "host": [
+                "{{sapiOracleCoreUrl}}"
+              ],
+              "path": [
+                "inventory",
+                "items"
+              ],
+              "query": [
+                {
+                  "key": "ids",
+                  "value": "20000000-0000-4000-8000-000000000100"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Salida de 3 de SKU-100: 409",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('409 INSUFFICIENT_STOCK', () => { pm.response.to.have.status(409); pm.expect(pm.response.json().code).to.eql('INSUFFICIENT_STOCK'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "client_id",
+                "value": "{{clientId}}"
+              },
+              {
+                "key": "client_secret",
+                "value": "{{clientSecret}}"
+              },
+              {
+                "key": "x-correlation-id",
+                "value": "{{$guid}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{sapiOracleCoreUrl}}/inventory/movements",
+              "host": [
+                "{{sapiOracleCoreUrl}}"
+              ],
+              "path": [
+                "inventory",
+                "movements"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"itemId\": \"20000000-0000-4000-8000-000000000100\",\n  \"type\": \"OUTBOUND\",\n  \"quantity\": 3,\n  \"reference\": \"postman-salida-sobre-stock\"\n}"
+            }
+          }
+        },
+        {
+          "name": "El stock sigue en 2",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('stock 2', () => pm.expect(pm.response.json()[0].stock).to.eql(2));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "client_id",
+                "value": "{{clientId}}"
+              },
+              {
+                "key": "client_secret",
+                "value": "{{clientSecret}}"
+              },
+              {
+                "key": "x-correlation-id",
+                "value": "{{$guid}}"
+              }
+            ],
+            "url": {
+              "raw": "{{sapiOracleCoreUrl}}/inventory/items?ids=20000000-0000-4000-8000-000000000100",
+              "host": [
+                "{{sapiOracleCoreUrl}}"
+              ],
+              "path": [
+                "inventory",
+                "items"
+              ],
+              "query": [
+                {
+                  "key": "ids",
+                  "value": "20000000-0000-4000-8000-000000000100"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Reposición de 3: 201",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 con stock 5', () => { pm.response.to.have.status(201); pm.expect(pm.response.json().resultingStock).to.eql(5); });",
+                  "pm.collectionVariables.set('movementId', pm.response.json().movementId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "client_id",
+                "value": "{{clientId}}"
+              },
+              {
+                "key": "client_secret",
+                "value": "{{clientSecret}}"
+              },
+              {
+                "key": "x-correlation-id",
+                "value": "{{$guid}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{sapiOracleCoreUrl}}/inventory/movements",
+              "host": [
+                "{{sapiOracleCoreUrl}}"
+              ],
+              "path": [
+                "inventory",
+                "movements"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"itemId\": \"20000000-0000-4000-8000-000000000100\",\n  \"type\": \"RESTOCK\",\n  \"quantity\": 3,\n  \"reference\": \"postman-reposicion-1\",\n  \"orderId\": \"10000000-0000-4000-8000-000000001002\"\n}"
+            }
+          }
+        },
+        {
+          "name": "La misma reposición otra vez: 200 y el original",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 con el mismo movimiento', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().movementId).to.eql(pm.collectionVariables.get('movementId')); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "client_id",
+                "value": "{{clientId}}"
+              },
+              {
+                "key": "client_secret",
+                "value": "{{clientSecret}}"
+              },
+              {
+                "key": "x-correlation-id",
+                "value": "{{$guid}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{sapiOracleCoreUrl}}/inventory/movements",
+              "host": [
+                "{{sapiOracleCoreUrl}}"
+              ],
+              "path": [
+                "inventory",
+                "movements"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"itemId\": \"20000000-0000-4000-8000-000000000100\",\n  \"type\": \"RESTOCK\",\n  \"quantity\": 3,\n  \"reference\": \"postman-reposicion-1\",\n  \"orderId\": \"10000000-0000-4000-8000-000000001002\"\n}"
+            }
+          }
+        },
+        {
+          "name": "El stock se movió una sola vez: 5",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('stock 5', () => pm.expect(pm.response.json()[0].stock).to.eql(5));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "client_id",
+                "value": "{{clientId}}"
+              },
+              {
+                "key": "client_secret",
+                "value": "{{clientSecret}}"
+              },
+              {
+                "key": "x-correlation-id",
+                "value": "{{$guid}}"
+              }
+            ],
+            "url": {
+              "raw": "{{sapiOracleCoreUrl}}/inventory/items?ids=20000000-0000-4000-8000-000000000100",
+              "host": [
+                "{{sapiOracleCoreUrl}}"
+              ],
+              "path": [
+                "inventory",
+                "items"
+              ],
+              "query": [
+                {
+                  "key": "ids",
+                  "value": "20000000-0000-4000-8000-000000000100"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Confirmar un pedido ya CONFIRMED: 409",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('409 INVALID_TRANSITION', () => { pm.response.to.have.status(409); pm.expect(pm.response.json().code).to.eql('INVALID_TRANSITION'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "client_id",
+                "value": "{{clientId}}"
+              },
+              {
+                "key": "client_secret",
+                "value": "{{clientSecret}}"
+              },
+              {
+                "key": "x-correlation-id",
+                "value": "{{$guid}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{sapiOracleCoreUrl}}/orders/10000000-0000-4000-8000-000000001002",
+              "host": [
+                "{{sapiOracleCoreUrl}}"
+              ],
+              "path": [
+                "orders",
+                "10000000-0000-4000-8000-000000001002"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"CONFIRMED\",\n  \"lines\": [\n    {\n      \"itemId\": \"20000000-0000-4000-8000-000000000100\",\n      \"quantity\": 5,\n      \"unitPrice\": 189,\n      \"priceSource\": \"LAST_PRICE\",\n      \"provider\": \"FAK\"\n    }\n  ]\n}"
+            }
+          }
+        },
+        {
+          "name": "/customers ya no existe: 404",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "client_id",
+                "value": "{{clientId}}"
+              },
+              {
+                "key": "client_secret",
+                "value": "{{clientSecret}}"
+              },
+              {
+                "key": "x-correlation-id",
+                "value": "{{$guid}}"
+              }
+            ],
+            "url": {
+              "raw": "{{sapiOracleCoreUrl}}/customers",
+              "host": [
+                "{{sapiOracleCoreUrl}}"
+              ],
+              "path": [
+                "customers"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "movementId",
+      "value": ""
+    }
+  ]
+}
