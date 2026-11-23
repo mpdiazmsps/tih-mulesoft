@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "C4 · Contexto de la PoC «Integración en la era agéntica»",
+    "output": ".archify/architecture-c4-20261120-185929/c4-1-contexto.html",
+    "quality_profile": "showcase",
+    "locale": "es"
+  },
+  "components": [
+    { "id": "tienda", "type": "frontend", "label": "Tienda en línea", "sublabel": "canal REST", "pos": [40, 150], "size": [150, 64] },
+    { "id": "aprobador", "type": "frontend", "label": "Aprobador", "sublabel": "Postman en la v1", "pos": [40, 260], "size": [150, 64] },
+    { "id": "agente", "type": "external", "label": "Agente de IA", "sublabel": "cliente MCP", "pos": [40, 370], "size": [150, 64] },
+    { "id": "poc", "type": "backend", "label": "Integración de la PoC", "sublabel": "10 apps Mule · CloudHub 2.0", "tag": "Experience · Process · System", "pos": [370, 150], "size": [220, 284] },
+    { "id": "erp", "type": "database", "label": "ERP", "sublabel": "Oracle STORE_APP", "pos": [800, 40], "size": [170, 64] },
+    { "id": "crm", "type": "external", "label": "CRM", "sublabel": "Salesforce", "pos": [800, 150], "size": [170, 64] },
+    { "id": "logistica", "type": "external", "label": "Logística", "sublabel": "SFTP del operador", "pos": [800, 260], "size": [170, 64] },
+    { "id": "proveedores", "type": "external", "label": "Proveedores A, B y C", "sublabel": "simulados · MXN", "pos": [800, 370], "size": [170, 64] },
+    { "id": "magicbell", "type": "cloud", "label": "MagicBell", "sublabel": "avisos por correo", "pos": [800, 480], "size": [170, 64] }
+  ],
+  "connections": [
+    { "id": "tienda-poc", "from": "tienda", "to": "poc", "label": "REST · HTTPS", "variant": "emphasis" },
+    { "id": "aprobador-poc", "from": "aprobador", "to": "poc", "label": "aprueba · HTTPS", "variant": "security" },
+    { "id": "agente-poc", "from": "agente", "to": "poc", "label": "MCP · HTTP", "variant": "emphasis" },
+    { "id": "poc-erp", "from": "poc", "to": "erp", "label": "JDBC" },
+    { "id": "poc-crm", "from": "poc", "to": "crm", "label": "API Salesforce (JWT)" },
+    { "id": "poc-logistica", "from": "poc", "to": "logistica", "label": "SFTP" },
+    { "id": "poc-proveedores", "from": "poc", "to": "proveedores", "label": "REST y SOAP" },
+    { "id": "poc-magicbell", "from": "poc", "to": "magicbell", "label": "HTTPS", "variant": "dashed" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Personas y canales", "items": ["La tienda registra pedidos y consulta el Pedido 360", "El agente consulta excepciones y propone correcciones", "Solo el aprobador aprueba o rechaza una corrección"] },
+    { "dot": "emerald", "title": "Sistemas de registro", "items": ["ERP: pedidos, inventario y proveedores (Oracle)", "CRM: clientes con segmento y dirección (Salesforce)", "Logística: remisiones y acuses por SFTP"] },
+    { "dot": "amber", "title": "Entorno de la v1", "items": ["Apps en CloudHub 2.0; Oracle, RabbitMQ, SFTP y proveedores en Docker local con túneles", "Los proveedores son simuladores propios, no APIs públicas"] }
+  ]
+}

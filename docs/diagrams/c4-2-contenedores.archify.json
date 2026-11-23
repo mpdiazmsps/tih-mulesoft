@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "C4 · Contenedores: 10 apps Mule y sus dependencias",
+    "output": ".archify/architecture-c4-20261120-185929/c4-2-contenedores.html",
+    "quality_profile": "showcase",
+    "locale": "es"
+  },
+  "components": [
+    { "id": "tienda", "type": "frontend", "label": "Tienda en línea", "sublabel": "canal REST", "pos": [40, 120], "size": [140, 60] },
+    { "id": "aprobador", "type": "frontend", "label": "Aprobador", "sublabel": "Postman", "pos": [40, 250], "size": [140, 60] },
+    { "id": "agente", "type": "external", "label": "Agente de IA", "sublabel": "cliente MCP", "pos": [40, 450], "size": [140, 60] },
+
+    { "id": "xapi", "type": "backend", "label": "xapi-online-store", "sublabel": "Experience · REST", "pos": [260, 180], "size": [160, 64] },
+    { "id": "mcp", "type": "backend", "label": "mcp-online-store", "sublabel": "Experience · MCP", "pos": [260, 450], "size": [160, 64] },
+
+    { "id": "pcust", "type": "backend", "label": "papi-customers", "sublabel": "clientes", "pos": [520, 40], "size": [160, 64] },
+    { "id": "pord", "type": "backend", "label": "papi-orders", "sublabel": "pedidos, 360, correcciones", "pos": [520, 230], "size": [160, 100] },
+    { "id": "preq", "type": "backend", "label": "papi-order-requests", "sublabel": "solicitudes y aprobación", "pos": [520, 450], "size": [160, 64] },
+    { "id": "pnot", "type": "backend", "label": "papi-notifications", "sublabel": "avisos por evento", "pos": [520, 660], "size": [160, 64] },
+
+    { "id": "scrm", "type": "backend", "label": "sapi-crm", "sublabel": "System", "pos": [820, 40], "size": [150, 60] },
+    { "id": "score", "type": "backend", "label": "sapi-oracle-core", "sublabel": "System", "pos": [820, 160], "size": [150, 60] },
+    { "id": "sprice", "type": "backend", "label": "sapi-price-providers", "sublabel": "System", "pos": [820, 280], "size": [150, 60] },
+    { "id": "ssftp", "type": "backend", "label": "sapi-sftp-orders", "sublabel": "System", "pos": [820, 400], "size": [150, 60] },
+    { "id": "mq", "type": "messagebus", "label": "RabbitMQ", "sublabel": "orders.events", "pos": [820, 560], "size": [150, 60] },
+    { "id": "intdb", "type": "database", "label": "Almacén de solicitudes", "sublabel": "Oracle INTEGRATION_APP", "pos": [260, 600], "size": [160, 64] },
+
+    { "id": "crm", "type": "external", "label": "Salesforce", "sublabel": "CRM", "pos": [1080, 40], "size": [140, 60] },
+    { "id": "erp", "type": "database", "label": "ERP", "sublabel": "Oracle STORE_APP", "pos": [1080, 160], "size": [140, 60] },
+    { "id": "prov", "type": "external", "label": "Proveedores", "sublabel": "A, B y C simulados", "pos": [1080, 280], "size": [140, 60] },
+    { "id": "sftp", "type": "external", "label": "SFTP logística", "sublabel": "remisiones", "pos": [1080, 400], "size": [140, 60] },
+    { "id": "mb", "type": "cloud", "label": "MagicBell", "sublabel": "correo", "pos": [1080, 660], "size": [140, 60] }
+  ],
+  "connections": [
+    { "id": "c-tienda-xapi", "from": "tienda", "to": "xapi", "label": "REST", "variant": "emphasis" },
+    { "id": "c-aprob-xapi", "from": "aprobador", "to": "xapi", "label": "approve", "variant": "security" },
+    { "id": "c-agente-mcp", "from": "agente", "to": "mcp", "label": "MCP", "variant": "emphasis" },
+    { "id": "c-xapi-pcust", "from": "xapi", "to": "pcust" },
+    { "id": "c-xapi-pord", "from": "xapi", "to": "pord" },
+    { "id": "c-xapi-preq", "from": "xapi", "to": "preq" },
+    { "id": "c-mcp-pord", "from": "mcp", "to": "pord" },
+    { "id": "c-mcp-preq", "from": "mcp", "to": "preq" },
+    { "id": "c-pord-pcust", "from": "pord", "to": "pcust", "label": "cliente" },
+    { "id": "c-preq-pord", "from": "preq", "to": "pord", "label": "corrections", "variant": "security" },
+    { "id": "c-preq-intdb", "from": "preq", "to": "intdb", "label": "JDBC" },
+    { "id": "c-pcust-scrm", "from": "pcust", "to": "scrm" },
+    { "id": "c-pord-scrm", "from": "pord", "to": "scrm" },
+    { "id": "c-pord-score", "from": "pord", "to": "score" },
+    { "id": "c-pord-sprice", "from": "pord", "to": "sprice" },
+    { "id": "c-pord-ssftp", "from": "pord", "to": "ssftp" },
+    { "id": "c-pord-mq", "from": "pord", "to": "mq", "label": "order.registered", "variant": "dashed" },
+    { "id": "c-preq-mq", "from": "preq", "to": "mq", "label": "approval / correction", "variant": "dashed" },
+    { "id": "c-mq-pnot", "from": "mq", "to": "pnot", "label": "AMQP", "variant": "dashed" },
+    { "id": "c-pnot-pcust", "from": "pnot", "to": "pcust", "label": "nombre y correo" },
+    { "id": "c-pnot-mb", "from": "pnot", "to": "mb", "label": "HTTPS" },
+    { "id": "c-scrm-crm", "from": "scrm", "to": "crm", "label": "JWT" },
+    { "id": "c-score-erp", "from": "score", "to": "erp", "label": "JDBC" },
+    { "id": "c-sprice-prov", "from": "sprice", "to": "prov", "label": "REST/SOAP" },
+    { "id": "c-ssftp-sftp", "from": "ssftp", "to": "sftp", "label": "SFTP" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Experience", "items": ["xapi-online-store: única puerta REST de la tienda y del aprobador", "mcp-online-store: cinco herramientas para el agente; ninguna aprueba"] },
+    { "dot": "emerald", "title": "Process", "items": ["papi-orders: registro, confirmación cada 60 s, Pedido 360, excepciones y correcciones", "papi-order-requests: llave única, estados, aprobación y vencimiento a 24 h", "papi-notifications: un correo por evento (ACK manual, DLQ)"] },
+    { "dot": "violet", "title": "System", "items": ["Cada una es la única puerta a su sistema", "Tiempo límite, reintento e interruptor con poc-resilience"] },
+    { "dot": "amber", "title": "Eventos", "items": ["order.registered: solo del ciclo de confirmación", "approval.requested y correction.applied: de papi-order-requests (D18)"] }
+  ]
+}

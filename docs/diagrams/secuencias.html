@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Secuencias de la PoC</title>
+<style>
+  :root { --bg:#f7f8fa; --card:#ffffff; --ink:#1f2933; --muted:#5f6b7a; --line:#d9dee5; --accent:#0b6bcb; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#11151a; --card:#1a2028; --ink:#e6eaf0; --muted:#9aa5b1; --line:#2c3440; --accent:#5aa9ff; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  header { padding:24px 16px 8px; max-width:1200px; margin:0 auto; }
+  h1 { margin:0 0 6px; font-size:24px; }
+  header p { margin:0; color:var(--muted); }
+  nav { display:flex; flex-wrap:wrap; gap:8px; max-width:1200px; margin:12px auto 0; padding:0 16px; }
+  nav a { color:var(--accent); text-decoration:none; border:1px solid var(--line); border-radius:999px; padding:4px 12px; background:var(--card); font-size:13px; }
+  main { max-width:1200px; margin:0 auto; padding:16px; }
+  section { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin:16px 0; }
+  h2 { margin:0 0 4px; font-size:19px; }
+  h3 { margin:16px 0 6px; font-size:15px; }
+  .src { margin:0 0 12px; color:var(--muted); font-size:13px; }
+  .diagram { overflow-x:auto; border-top:1px solid var(--line); padding-top:12px; }
+  pre.mermaid { margin:0; background:transparent; }
+  code { font-family:ui-monospace,Consolas,monospace; font-size:.92em; }
+  ul { margin:0; padding-left:20px; }
+  li { margin:4px 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Diagramas de secuencia de la PoC</h1>
+  <p>Los cuatro recorridos de la sección II.2 de la final. Generado desde los archivos <code>seq-*.mmd</code>.</p>
+</header>
+<nav><a href="#r1">1. La vida de un pedido</a><a href="#r2">2. El Pedido 360 (escenas 1 y 2)</a><a href="#r3">3. Cuando algo falla (escena 3)</a><a href="#r4">4. Corrección con aprobación (escena 4)</a></nav>
+<main>
+  <section id="r1">
+    <h2>1. La vida de un pedido</h2>
+    <p class="src">Fuente: <code>docs/diagrams/seq-1-vida-del-pedido.mmd</code></p>
+    <div class="diagram"><pre class="mermaid">
+sequenceDiagram
+    autonumber
+    actor T as Tienda en línea
+    participant X as xapi-online-store
+    participant PO as papi-orders
+    participant PC as papi-customers
+    participant CRM as sapi-crm
+    participant ERP as sapi-oracle-core
+    participant PP as sapi-price-providers
+    participant SF as sapi-sftp-orders
+    participant MQ as RabbitMQ
+    participant PN as papi-notifications
+    participant LOG as Logística (SFTP + simulador)
+    participant MB as MagicBell
+
+    Note over T,MB: Toda llamada HTTP lleva client_id / client_secret y x-correlation-id
+
+    rect rgb(232, 243, 255)
+    Note over T,ERP: Registro: la tienda no espera (menos de 1 s)
+    T-&gt;&gt;X: POST /orders {customerId, lines}
+    X-&gt;&gt;PO: POST /orders
+    PO-&gt;&gt;PC: GET /customers/{customerId}
+    PC-&gt;&gt;CRM: GET /contacts/{id}
+    CRM--&gt;&gt;PC: 200 Customer (Salesforce)
+    PC--&gt;&gt;PO: 200
+    PO-&gt;&gt;ERP: POST /orders {orderId, customerId, currency, lines}
+    ERP--&gt;&gt;PO: 201 Order status RECEIVED
+    PO--&gt;&gt;X: 201 {orderId, status: RECEIVED}
+    X--&gt;&gt;T: 201
+    end
+
+    rect rgb(240, 250, 240)
+    Note over PO,LOG: Confirmación: scheduler cada 60 s, sin traslapes (o POST /orders/process)
+    PO-&gt;&gt;ERP: GET /orders?status=RECEIVED
+    ERP--&gt;&gt;PO: pedidos RECEIVED
+    PO-&gt;&gt;ERP: GET /inventory/items?ids=
+    ERP--&gt;&gt;PO: stock, localPrice y providers
+    alt localPrice &gt; 0
+        Note over PO: priceSource LOCAL
+    else lastPrice del preferente
+        Note over PO: priceSource LAST_PRICE
+    else sin precio
+        PO-&gt;&gt;PP: GET /providers/{abv}/products/{externalId}/price
+        PP--&gt;&gt;PO: 200 Quote (o 503: el pedido sigue RECEIVED)
+    end
+    PO-&gt;&gt;ERP: PATCH /orders/{orderId} {status: CONFIRMED, lines}
+    ERP--&gt;&gt;PO: 200 Order CONFIRMED (guarda lastPrice)
+    alt stock completo
+        PO-&gt;&gt;ERP: POST /inventory/movements OUTBOUND por línea
+        PO-&gt;&gt;PC: GET /customers?ids=
+        PO-&gt;&gt;SF: POST /dispatch-notes
+        SF-&gt;&gt;LOG: remision_&lt;orderId&gt;_1.csv en /despachos/pendientes
+        SF--&gt;&gt;PO: 201 DispatchNote PENDING
+        PO-&gt;&gt;MQ: order.registered (orders.events)
+    else falta stock
+        Note over PO: CONFIRMED con faltante: dispatchNote ON_HOLD, sin evento
+    end
+    end
+
+    rect rgb(255, 246, 230)
+    Note over LOG,MB: Logística y aviso
+    LOG-&gt;&gt;LOG: simulador: pendientes → firmadas (+ acuse) o rechazadas (+ motivo)
+    MQ-&gt;&gt;PN: order.registered (ACK manual, 2 reintentos, DLQ)
+    PN-&gt;&gt;PC: GET /customers/{customerId}
+    PC--&gt;&gt;PN: nombre y correo
+    PN-&gt;&gt;MB: POST /broadcasts (correo al cliente)
+    end
+
+    </pre></div>
+    <h3>Puntos clave</h3>
+    <ul><li><strong>Registro sin espera:</strong> la tienda recibe <code>201 RECEIVED</code> en menos de 1 s; papi-orders solo valida al cliente en Salesforce (papi-customers → sapi-crm) y crea el pedido en el ERP.</li><li><strong>Confirmación programada:</strong> cada 60 s, sin traslapes, papi-orders toma los <code>RECEIVED</code> y fija el precio: <code>localPrice</code>, si no <code>lastPrice</code> del preferente, si no cotiza; si el proveedor no responde, el pedido sigue <code>RECEIVED</code>.</li><li><strong>Stock completo:</strong> salidas de inventario, remisión al SFTP y evento <code>order.registered</code>. <strong>Falta stock:</strong> queda <code>CONFIRMED</code> con la remisión <code>ON_HOLD</code> y sin evento (D8).</li><li><strong>Logística y aviso:</strong> el simulador firma o rechaza la remisión; papi-notifications consume el evento y envía el correo por MagicBell.</li></ul>
+  </section>
+  <section id="r2">
+    <h2>2. El Pedido 360 (escenas 1 y 2)</h2>
+    <p class="src">Fuente: <code>docs/diagrams/seq-2-pedido-360.mmd</code></p>
+    <div class="diagram"><pre class="mermaid">
+sequenceDiagram
+    autonumber
+    actor A as Agente de IA (cliente MCP)
+    participant M as mcp-online-store
+    participant PO as papi-orders
+    participant ERP as sapi-oracle-core
+    participant CRM as sapi-crm
+    participant SF as sapi-sftp-orders
+    participant PP as sapi-price-providers
+    participant PA as Proveedor A (REST)
+    participant PB as Proveedor B (REST)
+    participant PCs as Proveedor C (SOAP)
+
+    Note over A,PCs: La tienda obtiene lo mismo por xapi-online-store (GET /orders/exceptions y GET /orders/{orderId})
+
+    rect rgb(232, 243, 255)
+    Note over A,SF: Escena 1: ¿qué pedidos requieren mi atención?
+    A-&gt;&gt;M: list_exceptions(limit?)
+    M-&gt;&gt;PO: GET /orders/exceptions
+    par fuentes en paralelo
+        PO-&gt;&gt;ERP: GET /orders?status=
+        ERP--&gt;&gt;PO: pedidos, líneas y stock
+    and
+        PO-&gt;&gt;CRM: GET /contacts?ids= (un solo lote)
+        CRM--&gt;&gt;PO: segmento de cada cliente
+    and
+        PO-&gt;&gt;SF: GET /dispatch-notes?status=REJECTED
+        SF--&gt;&gt;PO: remisiones rechazadas
+    end
+    PO-&gt;&gt;PO: STOCK_SHORTAGE, UNCONFIRMED, DISPATCH_REJECTED · primero STRATEGIC, luego los más antiguos
+    PO--&gt;&gt;M: 200 OrderException[]
+    M--&gt;&gt;A: PED-1002, PED-1004, PED-1001, PED-1005
+    end
+
+    rect rgb(240, 250, 240)
+    Note over A,PCs: Escena 2: ¿qué hago con PED-1002? (menos de 3 s)
+    A-&gt;&gt;M: get_order(orderId)
+    M-&gt;&gt;PO: GET /orders/{orderId}
+    par
+        PO-&gt;&gt;ERP: GET /orders/{orderId} y GET /inventory/items?ids=
+        ERP--&gt;&gt;PO: CONFIRMED · SKU-100 ordered 5, available 2
+    and
+        PO-&gt;&gt;CRM: GET /contacts/{id}
+        CRM--&gt;&gt;PO: Constructora Cumbres · STRATEGIC
+    and
+        PO-&gt;&gt;SF: GET /dispatch-notes/{orderId}
+        SF--&gt;&gt;PO: 404 → dispatchNote ON_HOLD
+    end
+    PO-&gt;&gt;PP: POST /quotes [FAK 7, ESC 122, BOR 3]
+    par cotización en paralelo (2 s por proveedor)
+        PP-&gt;&gt;PA: GET /products/7
+        PA--&gt;&gt;PP: 189.00 MXN
+    and
+        PP-&gt;&gt;PB: GET /api/v1/products/122
+        PB--&gt;&gt;PP: 194.00 MXN
+    and
+        PP-&gt;&gt;PCs: GetArticleById(3)
+        PCs--&gt;&gt;PP: 175.00 MXN
+    end
+    PP--&gt;&gt;PO: {quotes: 3, noResponse: []}
+    PO-&gt;&gt;PO: alternatives: RESTOCK 3 con BOR (cheapest) · sources 3 of 3
+    PO--&gt;&gt;M: 200 Order360
+    M--&gt;&gt;A: Pedido 360 de PED-1002
+    end
+
+    </pre></div>
+    <h3>Puntos clave</h3>
+    <ul><li><strong>Escena 1:</strong> <code>list_exceptions</code> consulta ERP, CRM y logística en paralelo, detecta <code>STOCK_SHORTAGE</code>, <code>UNCONFIRMED</code> y <code>DISPATCH_REJECTED</code>, y ordena primero a los clientes <code>STRATEGIC</code>.</li><li><strong>Escena 2:</strong> <code>get_order</code> arma el Pedido 360 de PED-1002 en menos de 3 s: pedido y stock del ERP, cliente de Salesforce, remisión de logística y cotización en paralelo de los tres proveedores.</li><li><strong>Alternativa:</strong> reponer 3 de SKU-100 con el proveedor C (175.00 MXN), marcada como la más barata; <code>sources.providers = &quot;3 of 3&quot;</code>.</li><li>La tienda obtiene exactamente lo mismo por xapi-online-store.</li></ul>
+  </section>
+  <section id="r3">
+    <h2>3. Cuando algo falla (escena 3)</h2>
+    <p class="src">Fuente: <code>docs/diagrams/seq-3-fallas.mmd</code></p>
+    <div class="diagram"><pre class="mermaid">
+sequenceDiagram
+    autonumber
+    actor A as Agente o tienda
+    participant PO as papi-orders
+    participant PP as sapi-price-providers
+    participant PCs as Proveedor C (SOAP)
+    participant SF as sapi-sftp-orders
+    participant FS as SFTP
+    participant POR as papi-order-requests
+
+    rect rgb(255, 240, 240)
+    Note over A,PCs: Tiempo límite: el proveedor C responde en 5 s (demo/control slow-c)
+    A-&gt;&gt;PO: GET /orders/{orderId}
+    PO-&gt;&gt;PP: POST /quotes [FAK, ESC, BOR]
+    PP-&gt;&gt;PCs: GetArticleById(3)
+    Note over PP,PCs: Tiempo límite de 2 s. Sin reintento: solo se reintenta una falla de conexión (D9)
+    PP--&gt;&gt;PO: {quotes: 2, noResponse: [BOR TIMEOUT]}
+    PO--&gt;&gt;A: 200 Order360 · sources.providers = &quot;2 of 3&quot; (menos de 3 s)
+    end
+
+    rect rgb(255, 246, 230)
+    Note over A,FS: Interruptor automático: el SFTP no responde (demo/control sftp-down)
+    loop fallas 1 a 3
+        PO-&gt;&gt;SF: GET /dispatch-notes/{orderId}
+        SF-&gt;&gt;FS: conexión (3 s)
+        FS--xSF: sin respuesta
+        SF--&gt;&gt;PO: 503 retryable
+    end
+    Note over SF: 3 fallas seguidas: interruptor ABIERTO durante 30 s
+    A-&gt;&gt;PO: GET /orders/{orderId}
+    PO-&gt;&gt;SF: GET /dispatch-notes/{orderId}
+    SF--&gt;&gt;PO: 503 inmediato, sin llamar al SFTP
+    PO--&gt;&gt;A: 200 Order360 · dispatchNote.status = UNKNOWN · sources.logistics = UNAVAILABLE
+    Note over SF,FS: A los 30 s, una llamada de prueba (semiabierto). Si responde, se cierra solo (demo/control sftp-up)
+    end
+
+    rect rgb(240, 250, 240)
+    Note over A,POR: Llave única: el agente repite la solicitud de corrección
+    A-&gt;&gt;POR: POST /order-requests (Idempotency-Key k1)
+    POR--&gt;&gt;A: 202 requestId R1
+    A-&gt;&gt;POR: POST /order-requests (Idempotency-Key k1)
+    POR--&gt;&gt;A: 202 requestId R1 (la misma; no se crea otra)
+    end
+
+    </pre></div>
+    <h3>Puntos clave</h3>
+    <ul><li><strong>Tiempo límite:</strong> con el proveedor C a 5 s, la cotización corta a los 2 s y responde con dos de tres; C aparece en <code>noResponse</code> (sin reintento por tiempo agotado, D9).</li><li><strong>Interruptor automático:</strong> tras 3 fallas del SFTP se abre 30 s; las respuestas siguientes no esperan y el Pedido 360 muestra la remisión <code>UNKNOWN</code> con <code>sources.logistics = UNAVAILABLE</code>.</li><li><strong>Recuperación:</strong> al volver el SFTP, una llamada de prueba cierra el interruptor solo.</li><li><strong>Llave única:</strong> repetir la solicitud con la misma <code>Idempotency-Key</code> devuelve el mismo <code>requestId</code>.</li></ul>
+  </section>
+  <section id="r4">
+    <h2>4. Corrección con aprobación (escena 4)</h2>
+    <p class="src">Fuente: <code>docs/diagrams/seq-4-correccion.mmd</code></p>
+    <div class="diagram"><pre class="mermaid">
+sequenceDiagram
+    autonumber
+    actor A as Agente de IA (cliente MCP)
+    participant M as mcp-online-store
+    participant POR as papi-order-requests
+    participant DBI as Oracle INTEGRATION_APP
+    participant MQ as RabbitMQ
+    participant PN as papi-notifications
+    participant MB as MagicBell
+    actor AP as Aprobador (Postman)
+    participant X as xapi-online-store
+    participant PO as papi-orders
+    participant ERP as sapi-oracle-core
+    participant SF as sapi-sftp-orders
+
+    rect rgb(232, 243, 255)
+    Note over A,MB: Solicitud: única acción del agente que escribe datos
+    A-&gt;&gt;M: request_correction(orderId, RESTOCK, BOR, 3)
+    M-&gt;&gt;POR: POST /order-requests (Idempotency-Key derivada de orderId, type y provider)
+    POR-&gt;&gt;DBI: INSERT ORDER_REQUESTS (PENDING, vence en 24 h) + ORDER_REQUEST_EVENTS
+    POR-&gt;&gt;MQ: approval.requested
+    POR--&gt;&gt;M: 202 {requestId, status: PENDING}
+    M--&gt;&gt;A: recibido: consulta más tarde
+    MQ-&gt;&gt;PN: approval.requested
+    PN-&gt;&gt;MB: POST /broadcasts (correo al aprobador)
+    end
+
+    rect rgb(240, 250, 240)
+    Note over AP,SF: Aprobación y aplicación
+    AP-&gt;&gt;X: POST /order-requests/{requestId}/approve
+    X-&gt;&gt;POR: POST /order-requests/{requestId}/approve (x-client-app = aprobador)
+    alt client_id no es aprobador (por ejemplo, el del agente)
+        POR--&gt;&gt;X: 403 FORBIDDEN
+    else solicitud no PENDING (aprobada, rechazada o vencida)
+        POR--&gt;&gt;X: 409 INVALID_TRANSITION
+    else aprobador y PENDING
+        POR-&gt;&gt;DBI: APPROVED → APPLYING (con actor y hora)
+        POR-&gt;&gt;PO: POST /orders/{orderId}/corrections {type, provider, quantity, key}
+        PO-&gt;&gt;ERP: POST /inventory/movements RESTOCK 3 (reference = key)
+        ERP--&gt;&gt;PO: 201 (o 200 si la reference ya existía: el stock no se mueve dos veces)
+        PO-&gt;&gt;ERP: POST /inventory/movements OUTBOUND por línea (reference = key-out-itemId)
+        PO-&gt;&gt;SF: POST /dispatch-notes
+        SF--&gt;&gt;PO: 201 DispatchNote PENDING
+        Note over PO: No publica order.registered (D18)
+        PO--&gt;&gt;POR: 200 corrección aplicada
+        POR-&gt;&gt;DBI: COMPLETED + historia
+        POR-&gt;&gt;MQ: correction.applied (una sola vez)
+        POR--&gt;&gt;X: 200 OrderRequest COMPLETED
+        X--&gt;&gt;AP: 200
+    end
+    end
+
+    rect rgb(255, 246, 230)
+    Note over A,MB: Aviso al cliente y consulta del agente
+    MQ-&gt;&gt;PN: correction.applied
+    PN-&gt;&gt;MB: POST /broadcasts (correo a Constructora Cumbres)
+    A-&gt;&gt;M: get_request(requestId)
+    M-&gt;&gt;POR: GET /order-requests/{requestId}
+    POR--&gt;&gt;M: COMPLETED con su historia (quién y cuándo)
+    M--&gt;&gt;A: solicitud completada
+    end
+
+    </pre></div>
+    <h3>Puntos clave</h3>
+    <ul><li><strong>El agente propone:</strong> <code>request_correction</code> crea la solicitud <code>PENDING</code> (vence en 24 h), publica <code>approval.requested</code> y responde <code>202</code>; el aprobador recibe un correo.</li><li><strong>Una persona decide:</strong> solo la aplicación del aprobador puede aprobar (403 para el agente); aprobar algo que no está <code>PENDING</code> da 409.</li><li><strong>Se aplica una sola vez:</strong> papi-orders repone y descuenta con la misma llave como <code>reference</code>, y emite la remisión. No publica <code>order.registered</code> (D18).</li><li><strong>Un solo aviso al cliente:</strong> papi-order-requests termina en <code>COMPLETED</code> y publica <code>correction.applied</code> una vez; el cliente recibe un correo y el agente ve la historia completa.</li></ul>
+  </section>
+</main>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.esm.min.mjs";
+  const dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+  mermaid.initialize({ startOnLoad: true, theme: dark ? "dark" : "default", securityLevel: "strict",
+    sequence: { showSequenceNumbers: true, wrap: true, width: 170 } });
+</script>
+</body>
+</html>

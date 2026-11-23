@@ -1,0 +1,68 @@
+%% Recorrido 1 (II.2): la vida de un pedido. El pedido nace RECEIVED y un scheduler lo confirma.
+sequenceDiagram
+    autonumber
+    actor T as Tienda en línea
+    participant X as xapi-online-store
+    participant PO as papi-orders
+    participant PC as papi-customers
+    participant CRM as sapi-crm
+    participant ERP as sapi-oracle-core
+    participant PP as sapi-price-providers
+    participant SF as sapi-sftp-orders
+    participant MQ as RabbitMQ
+    participant PN as papi-notifications
+    participant LOG as Logística (SFTP + simulador)
+    participant MB as MagicBell
+
+    Note over T,MB: Toda llamada HTTP lleva client_id / client_secret y x-correlation-id
+
+    rect rgb(232, 243, 255)
+    Note over T,ERP: Registro: la tienda no espera (menos de 1 s)
+    T->>X: POST /orders {customerId, lines}
+    X->>PO: POST /orders
+    PO->>PC: GET /customers/{customerId}
+    PC->>CRM: GET /contacts/{id}
+    CRM-->>PC: 200 Customer (Salesforce)
+    PC-->>PO: 200
+    PO->>ERP: POST /orders {orderId, customerId, currency, lines}
+    ERP-->>PO: 201 Order status RECEIVED
+    PO-->>X: 201 {orderId, status: RECEIVED}
+    X-->>T: 201
+    end
+
+    rect rgb(240, 250, 240)
+    Note over PO,LOG: Confirmación: scheduler cada 60 s, sin traslapes (o POST /orders/process)
+    PO->>ERP: GET /orders?status=RECEIVED
+    ERP-->>PO: pedidos RECEIVED
+    PO->>ERP: GET /inventory/items?ids=
+    ERP-->>PO: stock, localPrice y providers
+    alt localPrice > 0
+        Note over PO: priceSource LOCAL
+    else lastPrice del preferente
+        Note over PO: priceSource LAST_PRICE
+    else sin precio
+        PO->>PP: GET /providers/{abv}/products/{externalId}/price
+        PP-->>PO: 200 Quote (o 503: el pedido sigue RECEIVED)
+    end
+    PO->>ERP: PATCH /orders/{orderId} {status: CONFIRMED, lines}
+    ERP-->>PO: 200 Order CONFIRMED (guarda lastPrice)
+    alt stock completo
+        PO->>ERP: POST /inventory/movements OUTBOUND por línea
+        PO->>PC: GET /customers?ids=
+        PO->>SF: POST /dispatch-notes
+        SF->>LOG: remision_<orderId>_1.csv en /despachos/pendientes
+        SF-->>PO: 201 DispatchNote PENDING
+        PO->>MQ: order.registered (orders.events)
+    else falta stock
+        Note over PO: CONFIRMED con faltante: dispatchNote ON_HOLD, sin evento
+    end
+    end
+
+    rect rgb(255, 246, 230)
+    Note over LOG,MB: Logística y aviso
+    LOG->>LOG: simulador: pendientes → firmadas (+ acuse) o rechazadas (+ motivo)
+    MQ->>PN: order.registered (ACK manual, 2 reintentos, DLQ)
+    PN->>PC: GET /customers/{customerId}
+    PC-->>PN: nombre y correo
+    PN->>MB: POST /broadcasts (correo al cliente)
+    end

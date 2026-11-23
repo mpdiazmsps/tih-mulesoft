@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "C4 · Componentes de papi-orders",
+    "output": ".archify/architecture-c4-20261120-185929/c4-3-componentes-papi-orders.html",
+    "quality_profile": "showcase",
+    "locale": "es"
+  },
+  "components": [
+    { "id": "xapi", "type": "frontend", "label": "xapi-online-store", "sublabel": "Experience", "pos": [40, 120], "size": [150, 60] },
+    { "id": "mcp", "type": "frontend", "label": "mcp-online-store", "sublabel": "Experience", "pos": [40, 250], "size": [150, 60] },
+    { "id": "preq", "type": "external", "label": "papi-order-requests", "sublabel": "aplica lo aprobado", "pos": [40, 380], "size": [150, 60] },
+
+    { "id": "api", "type": "security", "label": "Interfaz APIkit", "sublabel": "contrato de Exchange", "tag": "valida y enruta", "pos": [290, 200], "size": [160, 140] },
+
+    { "id": "reg", "type": "backend", "label": "Registro", "sublabel": "POST /orders < 1 s", "pos": [560, 20], "size": [170, 60] },
+    { "id": "cat", "type": "backend", "label": "Catálogo", "sublabel": "GET /products, sin cotizar", "pos": [560, 120], "size": [170, 60] },
+    { "id": "o360", "type": "backend", "label": "Pedido 360", "sublabel": "scatter-gather < 3 s", "pos": [560, 220], "size": [170, 60] },
+    { "id": "exc", "type": "backend", "label": "Excepciones y alternativas", "sublabel": "prioridad STRATEGIC", "pos": [560, 320], "size": [170, 60] },
+    { "id": "corr", "type": "backend", "label": "Correcciones", "sublabel": "misma llave · sin order.registered", "pos": [560, 420], "size": [170, 60] },
+    { "id": "cycle", "type": "backend", "label": "Ciclo de confirmación", "sublabel": "scheduler 60 s + candado", "pos": [560, 540], "size": [170, 60] },
+    { "id": "res", "type": "security", "label": "poc-resilience", "sublabel": "tiempo límite · interruptor", "pos": [290, 540], "size": [160, 60] },
+    { "id": "pub", "type": "messagebus", "label": "Publicador AMQP", "sublabel": "order.registered", "pos": [560, 660], "size": [170, 60] },
+
+    { "id": "pcust", "type": "external", "label": "papi-customers", "sublabel": "Process", "pos": [880, 20], "size": [160, 60] },
+    { "id": "score", "type": "external", "label": "sapi-oracle-core", "sublabel": "ERP", "pos": [880, 160], "size": [160, 60] },
+    { "id": "scrm", "type": "external", "label": "sapi-crm", "sublabel": "Salesforce", "pos": [880, 260], "size": [160, 60] },
+    { "id": "sprice", "type": "external", "label": "sapi-price-providers", "sublabel": "proveedores", "pos": [880, 360], "size": [160, 60] },
+    { "id": "ssftp", "type": "external", "label": "sapi-sftp-orders", "sublabel": "logística", "pos": [880, 460], "size": [160, 60] },
+    { "id": "mq", "type": "messagebus", "label": "RabbitMQ", "sublabel": "orders.events", "pos": [880, 660], "size": [160, 60] }
+  ],
+  "connections": [
+    { "id": "k-xapi-api", "from": "xapi", "to": "api", "label": "REST", "variant": "emphasis" },
+    { "id": "k-mcp-api", "from": "mcp", "to": "api", "label": "REST", "variant": "emphasis" },
+    { "id": "k-preq-api", "from": "preq", "to": "api", "label": "corrections", "variant": "security" },
+    { "id": "k-api-reg", "from": "api", "to": "reg" },
+    { "id": "k-api-cat", "from": "api", "to": "cat" },
+    { "id": "k-api-o360", "from": "api", "to": "o360" },
+    { "id": "k-api-exc", "from": "api", "to": "exc" },
+    { "id": "k-api-corr", "from": "api", "to": "corr" },
+    { "id": "k-reg-pcust", "from": "reg", "to": "pcust", "label": "GET /customers" },
+    { "id": "k-o360-score", "from": "o360", "to": "score" },
+    { "id": "k-o360-scrm", "from": "o360", "to": "scrm" },
+    { "id": "k-o360-sprice", "from": "o360", "to": "sprice", "label": "POST /quotes" },
+    { "id": "k-exc-o360", "from": "exc", "to": "o360", "label": "usa" },
+    { "id": "k-corr-score", "from": "corr", "to": "score", "label": "movements" },
+    { "id": "k-corr-ssftp", "from": "corr", "to": "ssftp", "label": "remisión" },
+    { "id": "k-cycle-sprice", "from": "cycle", "to": "sprice", "label": "precio" },
+    { "id": "k-cycle-ssftp", "from": "cycle", "to": "ssftp", "label": "remisión" },
+    { "id": "k-cycle-res", "from": "cycle", "to": "res", "label": "usa" },
+    { "id": "k-cycle-pub", "from": "cycle", "to": "pub", "label": "stock completo" },
+    { "id": "k-pub-mq", "from": "pub", "to": "mq", "label": "AMQP", "variant": "dashed" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Entradas", "items": ["La tienda y el agente llegan por la xapi y el MCP", "papi-order-requests llama a /corrections solo con lo aprobado"] },
+    { "dot": "emerald", "title": "Reglas", "items": ["Precio: localPrice, si no lastPrice del preferente, si no cotiza", "Con stock completo: salidas, remisión y order.registered; si falta: ON_HOLD", "La misma llave nunca mueve el stock dos veces"] },
+    { "dot": "violet", "title": "Resiliencia", "items": ["Pedido 360, ciclo y alternativas usan poc-resilience", "Una fuente caída se marca en sources; la respuesta llega igual"] }
+  ]
+}

@@ -1,0 +1,44 @@
+%% Recorrido 3 (II.2): cuando algo falla. Escena 3. Biblioteca de resiliencia (poc-resilience).
+sequenceDiagram
+    autonumber
+    actor A as Agente o tienda
+    participant PO as papi-orders
+    participant PP as sapi-price-providers
+    participant PCs as Proveedor C (SOAP)
+    participant SF as sapi-sftp-orders
+    participant FS as SFTP
+    participant POR as papi-order-requests
+
+    rect rgb(255, 240, 240)
+    Note over A,PCs: Tiempo límite: el proveedor C responde en 5 s (demo/control slow-c)
+    A->>PO: GET /orders/{orderId}
+    PO->>PP: POST /quotes [FAK, ESC, BOR]
+    PP->>PCs: GetArticleById(3)
+    Note over PP,PCs: Tiempo límite de 2 s. Sin reintento: solo se reintenta una falla de conexión (D9)
+    PP-->>PO: {quotes: 2, noResponse: [BOR TIMEOUT]}
+    PO-->>A: 200 Order360 · sources.providers = "2 of 3" (menos de 3 s)
+    end
+
+    rect rgb(255, 246, 230)
+    Note over A,FS: Interruptor automático: el SFTP no responde (demo/control sftp-down)
+    loop fallas 1 a 3
+        PO->>SF: GET /dispatch-notes/{orderId}
+        SF->>FS: conexión (3 s)
+        FS--xSF: sin respuesta
+        SF-->>PO: 503 retryable
+    end
+    Note over SF: 3 fallas seguidas: interruptor ABIERTO durante 30 s
+    A->>PO: GET /orders/{orderId}
+    PO->>SF: GET /dispatch-notes/{orderId}
+    SF-->>PO: 503 inmediato, sin llamar al SFTP
+    PO-->>A: 200 Order360 · dispatchNote.status = UNKNOWN · sources.logistics = UNAVAILABLE
+    Note over SF,FS: A los 30 s, una llamada de prueba (semiabierto). Si responde, se cierra solo (demo/control sftp-up)
+    end
+
+    rect rgb(240, 250, 240)
+    Note over A,POR: Llave única: el agente repite la solicitud de corrección
+    A->>POR: POST /order-requests (Idempotency-Key k1)
+    POR-->>A: 202 requestId R1
+    A->>POR: POST /order-requests (Idempotency-Key k1)
+    POR-->>A: 202 requestId R1 (la misma; no se crea otra)
+    end

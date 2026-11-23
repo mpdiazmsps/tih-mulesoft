@@ -1,0 +1,62 @@
+%% Recorrido 4 (II.2): corrección con aprobación. Escena 4. El agente propone y una persona decide.
+sequenceDiagram
+    autonumber
+    actor A as Agente de IA (cliente MCP)
+    participant M as mcp-online-store
+    participant POR as papi-order-requests
+    participant DBI as Oracle INTEGRATION_APP
+    participant MQ as RabbitMQ
+    participant PN as papi-notifications
+    participant MB as MagicBell
+    actor AP as Aprobador (Postman)
+    participant X as xapi-online-store
+    participant PO as papi-orders
+    participant ERP as sapi-oracle-core
+    participant SF as sapi-sftp-orders
+
+    rect rgb(232, 243, 255)
+    Note over A,MB: Solicitud: única acción del agente que escribe datos
+    A->>M: request_correction(orderId, RESTOCK, BOR, 3)
+    M->>POR: POST /order-requests (Idempotency-Key derivada de orderId, type y provider)
+    POR->>DBI: INSERT ORDER_REQUESTS (PENDING, vence en 24 h) + ORDER_REQUEST_EVENTS
+    POR->>MQ: approval.requested
+    POR-->>M: 202 {requestId, status: PENDING}
+    M-->>A: recibido: consulta más tarde
+    MQ->>PN: approval.requested
+    PN->>MB: POST /broadcasts (correo al aprobador)
+    end
+
+    rect rgb(240, 250, 240)
+    Note over AP,SF: Aprobación y aplicación
+    AP->>X: POST /order-requests/{requestId}/approve
+    X->>POR: POST /order-requests/{requestId}/approve (x-client-app = aprobador)
+    alt client_id no es aprobador (por ejemplo, el del agente)
+        POR-->>X: 403 FORBIDDEN
+    else solicitud no PENDING (aprobada, rechazada o vencida)
+        POR-->>X: 409 INVALID_TRANSITION
+    else aprobador y PENDING
+        POR->>DBI: APPROVED → APPLYING (con actor y hora)
+        POR->>PO: POST /orders/{orderId}/corrections {type, provider, quantity, key}
+        PO->>ERP: POST /inventory/movements RESTOCK 3 (reference = key)
+        ERP-->>PO: 201 (o 200 si la reference ya existía: el stock no se mueve dos veces)
+        PO->>ERP: POST /inventory/movements OUTBOUND por línea (reference = key-out-itemId)
+        PO->>SF: POST /dispatch-notes
+        SF-->>PO: 201 DispatchNote PENDING
+        Note over PO: No publica order.registered (D18)
+        PO-->>POR: 200 corrección aplicada
+        POR->>DBI: COMPLETED + historia
+        POR->>MQ: correction.applied (una sola vez)
+        POR-->>X: 200 OrderRequest COMPLETED
+        X-->>AP: 200
+    end
+    end
+
+    rect rgb(255, 246, 230)
+    Note over A,MB: Aviso al cliente y consulta del agente
+    MQ->>PN: correction.applied
+    PN->>MB: POST /broadcasts (correo a Constructora Cumbres)
+    A->>M: get_request(requestId)
+    M->>POR: GET /order-requests/{requestId}
+    POR-->>M: COMPLETED con su historia (quién y cuándo)
+    M-->>A: solicitud completada
+    end

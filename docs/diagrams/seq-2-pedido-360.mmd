@@ -1,0 +1,65 @@
+%% Recorrido 2 (II.2): el Pedido 360. Escenas 1 (bandeja de excepciones) y 2 (Pedido 360 con alternativas).
+sequenceDiagram
+    autonumber
+    actor A as Agente de IA (cliente MCP)
+    participant M as mcp-online-store
+    participant PO as papi-orders
+    participant ERP as sapi-oracle-core
+    participant CRM as sapi-crm
+    participant SF as sapi-sftp-orders
+    participant PP as sapi-price-providers
+    participant PA as Proveedor A (REST)
+    participant PB as Proveedor B (REST)
+    participant PCs as Proveedor C (SOAP)
+
+    Note over A,PCs: La tienda obtiene lo mismo por xapi-online-store (GET /orders/exceptions y GET /orders/{orderId})
+
+    rect rgb(232, 243, 255)
+    Note over A,SF: Escena 1: ¿qué pedidos requieren mi atención?
+    A->>M: list_exceptions(limit?)
+    M->>PO: GET /orders/exceptions
+    par fuentes en paralelo
+        PO->>ERP: GET /orders?status=
+        ERP-->>PO: pedidos, líneas y stock
+    and
+        PO->>CRM: GET /contacts?ids= (un solo lote)
+        CRM-->>PO: segmento de cada cliente
+    and
+        PO->>SF: GET /dispatch-notes?status=REJECTED
+        SF-->>PO: remisiones rechazadas
+    end
+    PO->>PO: STOCK_SHORTAGE, UNCONFIRMED, DISPATCH_REJECTED · primero STRATEGIC, luego los más antiguos
+    PO-->>M: 200 OrderException[]
+    M-->>A: PED-1002, PED-1004, PED-1001, PED-1005
+    end
+
+    rect rgb(240, 250, 240)
+    Note over A,PCs: Escena 2: ¿qué hago con PED-1002? (menos de 3 s)
+    A->>M: get_order(orderId)
+    M->>PO: GET /orders/{orderId}
+    par
+        PO->>ERP: GET /orders/{orderId} y GET /inventory/items?ids=
+        ERP-->>PO: CONFIRMED · SKU-100 ordered 5, available 2
+    and
+        PO->>CRM: GET /contacts/{id}
+        CRM-->>PO: Constructora Cumbres · STRATEGIC
+    and
+        PO->>SF: GET /dispatch-notes/{orderId}
+        SF-->>PO: 404 → dispatchNote ON_HOLD
+    end
+    PO->>PP: POST /quotes [FAK 7, ESC 122, BOR 3]
+    par cotización en paralelo (2 s por proveedor)
+        PP->>PA: GET /products/7
+        PA-->>PP: 189.00 MXN
+    and
+        PP->>PB: GET /api/v1/products/122
+        PB-->>PP: 194.00 MXN
+    and
+        PP->>PCs: GetArticleById(3)
+        PCs-->>PP: 175.00 MXN
+    end
+    PP-->>PO: {quotes: 3, noResponse: []}
+    PO->>PO: alternatives: RESTOCK 3 con BOR (cheapest) · sources 3 of 3
+    PO-->>M: 200 Order360
+    M-->>A: Pedido 360 de PED-1002
+    end
