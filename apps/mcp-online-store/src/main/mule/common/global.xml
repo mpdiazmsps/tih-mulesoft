@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:mcp="http://www.mulesoft.org/schema/mule/mcp"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+		http://www.mulesoft.org/schema/mule/mcp http://www.mulesoft.org/schema/mule/mcp/current/mule-mcp.xsd">
+
+	<global-property name="env" value="local"
+		doc:name="Global Property"
+		doc:description="Active environment: local by default; CloudHub passes env=cloud"/>
+
+	<configuration-properties file="properties/${env}-application-config.yaml"
+		doc:name="Configuration properties"
+		doc:description="Environment properties: listener, MCP server identity and the Process APIs"/>
+
+	<configuration defaultErrorHandler-ref="global-error-handler"
+		doc:name="Configuration"
+		doc:description="Global error handler: logs the error; the tool listener answers it with its error content"/>
+
+	<http:listener-config name="mcp-online-store-httpListenerConfig"
+		doc:name="HTTP Listener config"
+		doc:description="HTTP listener that exposes the MCP endpoint. Host and port come from the environment properties">
+		<http:listener-connection host="${http.listener.host}" port="${http.listener.port}"
+			doc:description="Opens the environment HTTP port; on CloudHub the load balancer terminates TLS"/>
+	</http:listener-config>
+
+	<mcp:server-config name="mcp-online-store-server-config" serverName="${mcp.serverName}" serverVersion="${mcp.serverVersion}"
+		doc:name="MCP Server config"
+		doc:description="MCP server of the agent channel: five business tools over streamable HTTP">
+		<mcp:streamable-http-server-connection listenerConfig="mcp-online-store-httpListenerConfig" mcpEndpointPath="${mcp.endpointPath}"
+			requestTimeout="${mcp.requestTimeoutSeconds}" requestTimeoutUnit="SECONDS"/>
+	</mcp:server-config>
+
+	<http:request-config name="papi-orders-http-config" basePath="${papi.orders.basePath}" responseTimeout="${papi.timeoutMillis}"
+		doc:name="papi-orders-http-config" doc:description="HTTP client for papi-orders (order, exceptions and alternatives)">
+		<http:request-connection protocol="${papi.orders.protocol}" host="${papi.orders.host}" port="${papi.orders.port}"/>
+		<http:default-headers>
+			<http:default-header key="client_id" value="${papi.clientId}"/>
+			<http:default-header key="client_secret" value="${papi.clientSecret}"/>
+		</http:default-headers>
+	</http:request-config>
+
+	<http:request-config name="papi-order-requests-http-config" basePath="${papi.orderRequests.basePath}" responseTimeout="${papi.timeoutMillis}"
+		doc:name="papi-order-requests-http-config" doc:description="HTTP client for papi-order-requests (create and read requests)">
+		<http:request-connection protocol="${papi.orderRequests.protocol}" host="${papi.orderRequests.host}" port="${papi.orderRequests.port}"/>
+		<http:default-headers>
+			<http:default-header key="client_id" value="${papi.clientId}"/>
+			<http:default-header key="client_secret" value="${papi.clientSecret}"/>
+		</http:default-headers>
+	</http:request-config>
+
+	<error-handler name="global-error-handler" doc:name="Error Handler" doc:description="Logs the error and lets the tool listener answer it">
+		<on-error-propagate type="ANY" logException="false" doc:name="On Error Propagate" doc:description="The tool answers with its on-error content">
+			<logger level="ERROR"
+				message="#['ERROR - ' ++ (error.errorType.namespace default 'MULE') ++ ':' ++ (error.errorType.identifier default 'ANY') ++ ' - ' ++ (error.description default '') ++ ' correlationId: ' ++ correlationId]"
+				doc:name="logger-global-error" doc:description="Logs the error type, its description and the correlationId"/>
+		</on-error-propagate>
+	</error-handler>
+
+</mule>

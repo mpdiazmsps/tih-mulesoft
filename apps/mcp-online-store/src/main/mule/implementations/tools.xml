@@ -1,0 +1,279 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:mcp="http://www.mulesoft.org/schema/mule/mcp"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+		http://www.mulesoft.org/schema/mule/mcp http://www.mulesoft.org/schema/mule/mcp/current/mule-mcp.xsd">
+
+	<!-- The five tools of specs/mcp-online-store/tools.yaml (descriptions and parameter schemas copied from it by a
+	     script). Each tool is a call to the Process APIs: no business logic here, and no tool approves or applies. -->
+
+	<flow name="get-order-tool-flow" doc:name="get-order-tool-flow" doc:description="get_order: the Order 360 from papi-orders">
+		<mcp:tool-listener config-ref="mcp-online-store-server-config" name="get_order"
+			doc:name="tool-listener-get_order" doc:description="Get an order (read-only)">
+			<mcp:description><![CDATA[Returns the Order 360: status, customer and segment, lines with their availability and dispatch note status. It tells whether any source did not answer.]]></mcp:description>
+			<mcp:parameters-schema><![CDATA[
+				{
+				  "type": "object",
+				  "properties": {
+				    "orderId": {
+				      "type": "string",
+				      "format": "uuid",
+				      "description": "Order identifier, as returned by list_exceptions."
+				    }
+				  },
+				  "required": [
+				    "orderId"
+				  ],
+				  "additionalProperties": false
+				}
+			]]></mcp:parameters-schema>
+			<mcp:responses>
+				<mcp:text-tool-response-content text="#[output text/plain --- write(payload, 'application/json')]"/>
+			</mcp:responses>
+			<mcp:on-error-responses>
+				<mcp:text-tool-response-content text="#[output text/plain --- error.description default 'The tool could not complete the call']"/>
+			</mcp:on-error-responses>
+		</mcp:tool-listener>
+		<flow-ref name="tool-call-prepare-subflow" doc:name="flow-ref-tool-call-prepare" doc:description="Agent client application and correlation headers"/>
+		<http:request method="GET" config-ref="papi-orders-http-config" path="#['/orders/' ++ payload.orderId]"
+			doc:name="http-request-order360" doc:description="GET '/orders/' ++ payload.orderId papi-orders; any status is accepted and checked next">
+			<http:headers><![CDATA[#[vars.papiHeaders]]]></http:headers>
+			<http:response-validator>
+				<http:success-status-code-validator values="0..599"/>
+			</http:response-validator>
+		</http:request>
+		<flow-ref name="papi-answer-check-subflow" doc:name="flow-ref-papi-answer-check" doc:description="A 4xx or 5xx becomes the tool error text"/>
+	</flow>
+
+	<flow name="list-exceptions-tool-flow" doc:name="list-exceptions-tool-flow" doc:description="list_exceptions: the same list as GET /orders/exceptions of papi-orders">
+		<mcp:tool-listener config-ref="mcp-online-store-server-config" name="list_exceptions"
+			doc:name="tool-listener-list_exceptions" doc:description="List the exceptions (read-only)">
+			<mcp:description><![CDATA[Lists the orders with problems (stock shortage, unconfirmed order or rejected dispatch note), prioritized by the customer segment.]]></mcp:description>
+			<mcp:parameters-schema><![CDATA[
+				{
+				  "type": "object",
+				  "properties": {
+				    "limit": {
+				      "type": "integer",
+				      "minimum": 1,
+				      "maximum": 50,
+				      "default": 20,
+				      "description": "Maximum number of orders to return."
+				    }
+				  },
+				  "additionalProperties": false
+				}
+			]]></mcp:parameters-schema>
+			<mcp:responses>
+				<mcp:text-tool-response-content text="#[output text/plain --- write(payload, 'application/json')]"/>
+			</mcp:responses>
+			<mcp:on-error-responses>
+				<mcp:text-tool-response-content text="#[output text/plain --- error.description default 'The tool could not complete the call']"/>
+			</mcp:on-error-responses>
+		</mcp:tool-listener>
+		<flow-ref name="tool-call-prepare-subflow" doc:name="flow-ref-tool-call-prepare" doc:description="Agent client application and correlation headers"/>
+		<http:request method="GET" config-ref="papi-orders-http-config" path="/orders/exceptions"
+			doc:name="http-request-exceptions" doc:description="GET /orders/exceptions papi-orders; any status is accepted and checked next">
+			<http:headers><![CDATA[#[vars.papiHeaders]]]></http:headers>
+			<http:query-params><![CDATA[#[{ limit: (payload.limit default 20) as String }]]]></http:query-params>
+			<http:response-validator>
+				<http:success-status-code-validator values="0..599"/>
+			</http:response-validator>
+		</http:request>
+		<flow-ref name="papi-answer-check-subflow" doc:name="flow-ref-papi-answer-check" doc:description="A 4xx or 5xx becomes the tool error text"/>
+	</flow>
+
+	<flow name="propose-alternatives-tool-flow" doc:name="propose-alternatives-tool-flow" doc:description="propose_alternatives: the quoted alternatives from papi-orders">
+		<mcp:tool-listener config-ref="mcp-online-store-server-config" name="propose_alternatives"
+			doc:name="tool-listener-propose_alternatives" doc:description="Propose alternatives (read-only)">
+			<mcp:description><![CDATA[Offers options to resolve an exception: restock with the cheapest provider, with the quotes of all of them, or reissue a dispatch note.]]></mcp:description>
+			<mcp:parameters-schema><![CDATA[
+				{
+				  "type": "object",
+				  "properties": {
+				    "orderId": {
+				      "type": "string",
+				      "format": "uuid",
+				      "description": "Order with the exception."
+				    }
+				  },
+				  "required": [
+				    "orderId"
+				  ],
+				  "additionalProperties": false
+				}
+			]]></mcp:parameters-schema>
+			<mcp:responses>
+				<mcp:text-tool-response-content text="#[output text/plain --- write(payload, 'application/json')]"/>
+			</mcp:responses>
+			<mcp:on-error-responses>
+				<mcp:text-tool-response-content text="#[output text/plain --- error.description default 'The tool could not complete the call']"/>
+			</mcp:on-error-responses>
+		</mcp:tool-listener>
+		<flow-ref name="tool-call-prepare-subflow" doc:name="flow-ref-tool-call-prepare" doc:description="Agent client application and correlation headers"/>
+		<http:request method="GET" config-ref="papi-orders-http-config" path="#['/orders/' ++ payload.orderId ++ '/alternatives']"
+			doc:name="http-request-alternatives" doc:description="GET '/orders/' ++ payload.orderId ++ '/alternatives' papi-orders; any status is accepted and checked next">
+			<http:headers><![CDATA[#[vars.papiHeaders]]]></http:headers>
+			<http:response-validator>
+				<http:success-status-code-validator values="0..599"/>
+			</http:response-validator>
+		</http:request>
+		<flow-ref name="papi-answer-check-subflow" doc:name="flow-ref-papi-answer-check" doc:description="A 4xx or 5xx becomes the tool error text"/>
+	</flow>
+
+	<flow name="request-correction-tool-flow" doc:name="request-correction-tool-flow" doc:description="request_correction: creates the request in papi-order-requests with a key derived from order, type and provider">
+		<mcp:tool-listener config-ref="mcp-online-store-server-config" name="request_correction"
+			doc:name="tool-listener-request_correction" doc:description="Request a correction (requests-only)">
+			<mcp:description><![CDATA[Asks to restock or to reissue a dispatch note. It does not apply it: it creates a request that a person must approve.]]></mcp:description>
+			<mcp:parameters-schema><![CDATA[
+				{
+				  "type": "object",
+				  "properties": {
+				    "orderId": {
+				      "type": "string",
+				      "format": "uuid",
+				      "description": "Order to correct."
+				    },
+				    "type": {
+				      "type": "string",
+				      "enum": [
+				        "RESTOCK",
+				        "REISSUE"
+				      ],
+				      "description": "RESTOCK to restock the missing quantity; REISSUE to reissue a rejected dispatch note."
+				    },
+				    "provider": {
+				      "type": "string",
+				      "enum": [
+				        "FAK",
+				        "ESC",
+				        "BOR"
+				      ],
+				      "description": "Provider for a RESTOCK. When omitted, the cheapest one of propose_alternatives."
+				    },
+				    "quantity": {
+				      "type": "integer",
+				      "minimum": 1,
+				      "description": "Units to restock. When omitted, the missing quantity."
+				    }
+				  },
+				  "required": [
+				    "orderId",
+				    "type"
+				  ],
+				  "additionalProperties": false
+				}
+			]]></mcp:parameters-schema>
+			<mcp:responses>
+				<mcp:text-tool-response-content text="#[output text/plain --- write(payload, 'application/json')]"/>
+			</mcp:responses>
+			<mcp:on-error-responses>
+				<mcp:text-tool-response-content text="#[output text/plain --- error.description default 'The tool could not complete the call']"/>
+			</mcp:on-error-responses>
+		</mcp:tool-listener>
+		<flow-ref name="tool-call-prepare-subflow" doc:name="flow-ref-tool-call-prepare" doc:description="Agent client application and correlation headers"/>
+		<set-variable variableName="args" value="#[output application/java --- payload]" doc:name="set-args" doc:description="Tool arguments"/>
+		<choice doc:name="choice-restock" doc:description="A RESTOCK takes item, missing quantity and quoted price from the alternatives">
+			<when expression="#[vars.args.'type' == 'RESTOCK']">
+				<http:request method="GET" config-ref="papi-orders-http-config" path="#['/orders/' ++ vars.args.orderId ++ '/alternatives']"
+					doc:name="http-request-alternatives-for-request" doc:description="GET '/orders/' ++ vars.args.orderId ++ '/alternatives' papi-orders; any status is accepted and checked next">
+					<http:headers><![CDATA[#[vars.papiHeaders]]]></http:headers>
+					<http:response-validator>
+						<http:success-status-code-validator values="0..599"/>
+					</http:response-validator>
+				</http:request>
+						<flow-ref name="papi-answer-check-subflow" doc:name="flow-ref-papi-answer-check" doc:description="A 4xx or 5xx becomes the tool error text"/>
+				<set-variable variableName="alternatives" value="#[output application/java --- payload]" doc:name="set-alternatives" doc:description="Item, shortage and quotes"/>
+				<set-variable variableName="provider" doc:name="set-provider" doc:description="The chosen provider or the cheapest one"
+					value="#[output application/java --- do { import restockProvider from modules::tools --- restockProvider(vars.args, vars.alternatives) }]"/>
+				<set-variable variableName="problem" doc:name="set-problem" doc:description="Why a RESTOCK cannot be requested, if so"
+					value="#[output application/java --- do { import restockProblem from modules::tools --- restockProblem(vars.alternatives, vars.provider) }]"/>
+				<choice doc:name="choice-restock-problem" doc:description="Stops when the order has no shortage or no quote of the provider">
+					<when expression="#[vars.problem != null]">
+						<raise-error type="APP:INVALID_CORRECTION" description="#[vars.problem]" doc:name="raise-invalid-correction" doc:description="The agent reads why"/>
+					</when>
+				</choice>
+			</when>
+			<otherwise>
+				<set-variable variableName="alternatives" value="#[{}]" doc:name="set-no-alternatives" doc:description="REISSUE needs nothing else"/>
+				<set-variable variableName="provider" value="#[null]" doc:name="set-no-provider" doc:description="REISSUE has no provider"/>
+			</otherwise>
+		</choice>
+		<set-variable variableName="idempotencyKey" doc:name="set-idempotency-key" doc:description="orderId:type:provider (none for REISSUE)"
+			value="#[output application/java --- do { import idempotencyKey from modules::tools --- idempotencyKey(vars.args, vars.provider) }]"/>
+		<http:request method="POST" config-ref="papi-order-requests-http-config" path="/order-requests"
+			doc:name="http-request-create-order-request" doc:description="POST /order-requests papi-order-requests; any status is accepted and checked next">
+			<http:body><![CDATA[#[output application/json --- do { import requestBody from modules::tools --- requestBody(vars.args, vars.alternatives, vars.provider) }]]]></http:body>
+			<http:headers><![CDATA[#[vars.papiHeaders ++ { 'Idempotency-Key': vars.idempotencyKey }]]]></http:headers>
+			<http:response-validator>
+				<http:success-status-code-validator values="0..599"/>
+			</http:response-validator>
+		</http:request>
+		<flow-ref name="papi-answer-check-subflow" doc:name="flow-ref-papi-answer-check" doc:description="A 4xx or 5xx becomes the tool error text"/>
+	</flow>
+
+	<flow name="get-request-tool-flow" doc:name="get-request-tool-flow" doc:description="get_request: status and history from papi-order-requests">
+		<mcp:tool-listener config-ref="mcp-online-store-server-config" name="get_request"
+			doc:name="tool-listener-get_request" doc:description="Get a request (read-only)">
+			<mcp:description><![CDATA[Tells whether the request was approved, rejected, expired or already applied, with its history.]]></mcp:description>
+			<mcp:parameters-schema><![CDATA[
+				{
+				  "type": "object",
+				  "properties": {
+				    "requestId": {
+				      "type": "string",
+				      "format": "uuid",
+				      "description": "Request identifier, as returned by request_correction."
+				    }
+				  },
+				  "required": [
+				    "requestId"
+				  ],
+				  "additionalProperties": false
+				}
+			]]></mcp:parameters-schema>
+			<mcp:responses>
+				<mcp:text-tool-response-content text="#[output text/plain --- write(payload, 'application/json')]"/>
+			</mcp:responses>
+			<mcp:on-error-responses>
+				<mcp:text-tool-response-content text="#[output text/plain --- error.description default 'The tool could not complete the call']"/>
+			</mcp:on-error-responses>
+		</mcp:tool-listener>
+		<flow-ref name="tool-call-prepare-subflow" doc:name="flow-ref-tool-call-prepare" doc:description="Agent client application and correlation headers"/>
+		<http:request method="GET" config-ref="papi-order-requests-http-config" path="#['/order-requests/' ++ payload.requestId]"
+			doc:name="http-request-order-request" doc:description="GET '/order-requests/' ++ payload.requestId papi-order-requests; any status is accepted and checked next">
+			<http:headers><![CDATA[#[vars.papiHeaders]]]></http:headers>
+			<http:response-validator>
+				<http:success-status-code-validator values="0..599"/>
+			</http:response-validator>
+		</http:request>
+		<flow-ref name="papi-answer-check-subflow" doc:name="flow-ref-papi-answer-check" doc:description="A 4xx or 5xx becomes the tool error text"/>
+	</flow>
+
+	<sub-flow name="tool-call-prepare-subflow" doc:name="tool-call-prepare-subflow"
+		doc:description="The agent client_id (header of the MCP request) travels to the Process APIs as x-client-app (D10)">
+		<set-variable variableName="papiHeaders" doc:name="set-papi-headers" doc:description="x-client-app and x-correlation-id"
+			value="#[output application/java --- {
+	'x-client-app': (attributes.additionalProperties.client_id default p('mcp.defaultClientApp')),
+	'x-correlation-id': correlationId
+}]"/>
+		<logger level="INFO" message="#[output application/java --- 'INIT - MCP tool call for ' ++ vars.papiHeaders.'x-client-app' ++ ' correlationId: ' ++ correlationId]"
+			doc:name="logger-tool-call" doc:description="Logs the calling agent application"/>
+	</sub-flow>
+
+	<sub-flow name="papi-answer-check-subflow" doc:name="papi-answer-check-subflow"
+		doc:description="A Process API error (4xx or 5xx) becomes APP:PAPI_ERROR with its ErrorResponse, so the agent reads it">
+		<choice doc:name="choice-papi-error" doc:description="Only 2xx answers continue">
+			<when expression="#[attributes.statusCode >= 400]">
+				<raise-error type="APP:PAPI_ERROR" description="#[output text/plain --- write(payload, 'application/json')]"
+					doc:name="raise-papi-error" doc:description="The tool answers the ErrorResponse as its error text"/>
+			</when>
+		</choice>
+	</sub-flow>
+
+</mule>

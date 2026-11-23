@@ -1,0 +1,149 @@
+# Contract of the mcp-online-store server: the five business tools of the agent channel.
+# Descriptions are the English translation of "Las herramientas del agente" (section II.4 of the final proposal, D5).
+# Each tool is one call to the Process APIs: no business logic in the server. No tool approves or applies anything.
+# Validated with specs/tools/tools.schema.json (npm --prefix specs/tools run validate-tools).
+server:
+  name: mcp-online-store
+  version: 1.0.0
+  description: >-
+    Agent channel of the online store: five tools in business language on top of the same Process APIs the store
+    uses. The agent never corrects an order by itself: it requests it, and a person decides.
+  transport: streamable-http
+  path: /mcp
+  access: >-
+    The agent identifies itself with its client_id (Client ID Enforcement). The server passes it to the Process APIs
+    as x-client-app, so papi-order-requests records who requested and refuses any approval by the agent (D10).
+  dependsOn: [papi-orders, papi-order-requests]
+
+tools:
+  - name: get_order
+    title: Get an order
+    description: >-
+      Returns the Order 360: status, customer and segment, lines with their availability and dispatch note status.
+      It tells whether any source did not answer.
+    access: read-only
+    annotations:
+      readOnlyHint: true
+      destructiveHint: false
+      idempotentHint: true
+      openWorldHint: false
+    inputSchema:
+      type: object
+      properties:
+        orderId:
+          type: string
+          format: uuid
+          description: Order identifier, as returned by list_exceptions.
+      required: [orderId]
+      additionalProperties: false
+    calls:
+      - GET papi-orders /orders/{orderId}
+
+  - name: list_exceptions
+    title: List the exceptions
+    description: >-
+      Lists the orders with problems (stock shortage, unconfirmed order or rejected dispatch note), prioritized by the
+      customer segment.
+    access: read-only
+    annotations:
+      readOnlyHint: true
+      destructiveHint: false
+      idempotentHint: true
+      openWorldHint: false
+    inputSchema:
+      type: object
+      properties:
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 20
+          description: Maximum number of orders to return.
+      additionalProperties: false
+    calls:
+      - GET papi-orders /orders/exceptions?limit={limit}
+
+  - name: propose_alternatives
+    title: Propose alternatives
+    description: >-
+      Offers options to resolve an exception: restock with the cheapest provider, with the quotes of all of them, or
+      reissue a dispatch note.
+    access: read-only
+    annotations:
+      readOnlyHint: true
+      destructiveHint: false
+      idempotentHint: true
+      openWorldHint: false
+    inputSchema:
+      type: object
+      properties:
+        orderId:
+          type: string
+          format: uuid
+          description: Order with the exception.
+      required: [orderId]
+      additionalProperties: false
+    calls:
+      - GET papi-orders /orders/{orderId}/alternatives
+
+  - name: request_correction
+    title: Request a correction
+    description: >-
+      Asks to restock or to reissue a dispatch note. It does not apply it: it creates a request that a person must
+      approve.
+    access: requests-only
+    annotations:
+      readOnlyHint: false
+      destructiveHint: false
+      idempotentHint: true
+      openWorldHint: false
+    inputSchema:
+      type: object
+      properties:
+        orderId:
+          type: string
+          format: uuid
+          description: Order to correct.
+        type:
+          type: string
+          enum: [RESTOCK, REISSUE]
+          description: RESTOCK to restock the missing quantity; REISSUE to reissue a rejected dispatch note.
+        provider:
+          type: string
+          enum: [FAK, ESC, BOR]
+          description: Provider for a RESTOCK. When omitted, the cheapest one of propose_alternatives.
+        quantity:
+          type: integer
+          minimum: 1
+          description: Units to restock. When omitted, the missing quantity.
+      required: [orderId, type]
+      additionalProperties: false
+    idempotencyKey: "{orderId}:{type}:{provider}"
+    idempotencyNote: >-
+      The key is derived from the order, the type and the provider (the chosen or the cheapest one; "none" for
+      REISSUE): asking twice returns the same request.
+    calls:
+      - GET papi-orders /orders/{orderId}/alternatives   # RESTOCK only: item, missing quantity and quoted price
+      - POST papi-order-requests /order-requests          # Idempotency-Key = idempotencyKey, x-client-app = agent
+
+  - name: get_request
+    title: Get a request
+    description: >-
+      Tells whether the request was approved, rejected, expired or already applied, with its history.
+    access: read-only
+    annotations:
+      readOnlyHint: true
+      destructiveHint: false
+      idempotentHint: true
+      openWorldHint: false
+    inputSchema:
+      type: object
+      properties:
+        requestId:
+          type: string
+          format: uuid
+          description: Request identifier, as returned by request_correction.
+      required: [requestId]
+      additionalProperties: false
+    calls:
+      - GET papi-order-requests /order-requests/{requestId}

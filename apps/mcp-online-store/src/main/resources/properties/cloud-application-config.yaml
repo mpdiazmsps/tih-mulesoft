@@ -1,0 +1,27 @@
+# Configuration for CloudHub 2.0 (env=cloud). Marker values: they are filled in task 26 with the real endpoints.
+http:
+  listener:
+    host: "0.0.0.0"
+    port: "8081"
+
+mcp:
+  serverName: "mcp-online-store"
+  serverVersion: "1.0.0"
+  endpointPath: "/mcp"
+  requestTimeoutSeconds: "15"
+  defaultClientApp: "agente-mcp"
+
+papi:
+  orders:
+    protocol: "HTTPS"
+    host: "papi-orders-CHANGE_ME.usa-e1.cloudhub.io"
+    port: "443"
+    basePath: "/api/v1/orders-management"
+  orderRequests:
+    protocol: "HTTPS"
+    host: "papi-order-requests-CHANGE_ME.usa-e1.cloudhub.io"
+    port: "443"
+    basePath: "/api/v1"
+  timeoutMillis: "10000"
+  clientId: "CHANGE_ME"
+  clientSecret: "CHANGE_ME"

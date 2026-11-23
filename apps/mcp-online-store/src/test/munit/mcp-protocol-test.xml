@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:mcp="http://www.mulesoft.org/schema/mule/mcp"
+	xmlns:munit="http://www.mulesoft.org/schema/mule/munit"
+	xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/mcp http://www.mulesoft.org/schema/mule/mcp/current/mule-mcp.xsd
+		http://www.mulesoft.org/schema/mule/munit http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+		http://www.mulesoft.org/schema/mule/munit-tools http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd">
+
+	<!-- MCP protocol tests: an MCP client calls the server on 8086 (it must be free). The Process APIs are mocked. -->
+	<munit:config name="mcp-protocol-test.xml"/>
+
+	<mcp:client-config name="test-mcp-client" clientName="munit-client" clientVersion="1.0.0" enableElicitations="false">
+		<mcp:streamable-http-client-connection serverUrl="http://localhost:8086" mcpEndpointPath="/mcp"/>
+	</mcp:client-config>
+
+	<munit:before-suite name="mcp-protocol-static-refs" description="Static references for MUnit (the tool flows are run through flow-ref)">
+		<choice>
+			<when expression="#[false]">
+				<flow-ref name="get-order-tool-flow"/>
+				<flow-ref name="list-exceptions-tool-flow"/>
+				<flow-ref name="propose-alternatives-tool-flow"/>
+				<flow-ref name="request-correction-tool-flow"/>
+				<flow-ref name="get-request-tool-flow"/>
+			</when>
+		</choice>
+	</munit:before-suite>
+
+	<munit:test name="toolsList_fiveTools_noToolApproves" description="tools/list answers the five tools of tools.yaml and none approves, rejects or applies">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="get-order-tool-flow"/>
+			<munit:enable-flow-source value="list-exceptions-tool-flow"/>
+			<munit:enable-flow-source value="propose-alternatives-tool-flow"/>
+			<munit:enable-flow-source value="request-correction-tool-flow"/>
+			<munit:enable-flow-source value="get-request-tool-flow"/>
+		</munit:enable-flow-sources>
+		<munit:execution>
+			<mcp:list-tools config-ref="test-mcp-client"/>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[output application/java --- sizeOf(payload)]" is="#[MunitTools::equalTo(5)]"/>
+			<munit-tools:assert-that expression="#[output application/java --- (payload.name orderBy $)]" is="#[MunitTools::equalTo(['get_order', 'get_request', 'list_exceptions', 'propose_alternatives', 'request_correction'])]"/>
+			<munit-tools:assert-that expression="#[output application/java --- sizeOf(payload.name filter ($ contains 'approve') or ($ contains 'reject') or ($ contains 'apply'))]" is="#[MunitTools::equalTo(0)]"/>
+		</munit:validation>
+	</munit:test>
+
+	<munit:test name="noToolApproves" description="No tool approves: asking for an approve tool fails at the protocol level">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="get-order-tool-flow"/>
+			<munit:enable-flow-source value="list-exceptions-tool-flow"/>
+			<munit:enable-flow-source value="propose-alternatives-tool-flow"/>
+			<munit:enable-flow-source value="request-correction-tool-flow"/>
+			<munit:enable-flow-source value="get-request-tool-flow"/>
+		</munit:enable-flow-sources>
+		<munit:behavior>
+			<munit-tools:mock-when processor="http:request">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-order-request"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/json --- { requestId: '30000000-0000-4000-8000-000000000042', orderId: '10000000-0000-4000-8000-000000001002', 'type': 'RESTOCK', status: 'PENDING', requestedBy: 'agente-mcp' }]" mediaType="application/json"/>
+					<munit-tools:attributes value="#[{ statusCode: 200, headers: { 'content-type': 'application/json' } }]"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+		</munit:behavior>
+		<munit:execution>
+			<try>
+				<mcp:call-tool config-ref="test-mcp-client" toolName="approve_request">
+					<mcp:arguments><![CDATA[#[{ requestId: '30000000-0000-4000-8000-000000000042' }]]]></mcp:arguments>
+				</mcp:call-tool>
+				<set-variable variableName="approved" value="#[true]"/>
+				<error-handler>
+					<on-error-continue type="ANY">
+						<set-variable variableName="approved" value="#[false]"/>
+					</on-error-continue>
+				</error-handler>
+			</try>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[output application/java --- vars.approved]" is="#[MunitTools::equalTo(false)]"/>
+			<munit-tools:verify-call processor="http:request" times="0">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-order-request"/>
+				</munit-tools:with-attributes>
+			</munit-tools:verify-call>
+		</munit:validation>
+	</munit:test>
+
+	<munit:test name="listExceptions_overMcp_sameListAsXapi" description="list_exceptions called over MCP answers the list of GET /orders/exceptions">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="get-order-tool-flow"/>
+			<munit:enable-flow-source value="list-exceptions-tool-flow"/>
+			<munit:enable-flow-source value="propose-alternatives-tool-flow"/>
+			<munit:enable-flow-source value="request-correction-tool-flow"/>
+			<munit:enable-flow-source value="get-request-tool-flow"/>
+		</munit:enable-flow-sources>
+		<munit:behavior>
+			<munit-tools:mock-when processor="http:request">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-exceptions"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/json --- [ { orderId: '10000000-0000-4000-8000-000000001002', 'type': 'STOCK_SHORTAGE', status: 'CONFIRMED', customer: { id: '003Hs00000CUMBRAAA', name: 'Constructora Cumbres', segment: 'STRATEGIC' }, detail: 'SKU-100 ordered 5, available 2' }, { orderId: '10000000-0000-4000-8000-000000001004', 'type': 'DISPATCH_REJECTED', status: 'CONFIRMED', customer: { id: '003Hs00000TAPATAAA', name: 'Grupo Hotelero Tapatío', segment: 'STRATEGIC' }, detail: 'Dirección incorrecta' } ]]" mediaType="application/json"/>
+					<munit-tools:attributes value="#[{ statusCode: 200, headers: { 'content-type': 'application/json' } }]"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+		</munit:behavior>
+		<munit:execution>
+			<mcp:call-tool config-ref="test-mcp-client" toolName="list_exceptions" extractStructuredContent="false">
+				<mcp:arguments><![CDATA[#[{ limit: 20 }]]]></mcp:arguments>
+			</mcp:call-tool>
+			<logger level="INFO" message="#[output application/json --- payload]"/>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[output application/java --- write(payload, 'application/json') contains '10000000-0000-4000-8000-000000001004']" is="#[MunitTools::equalTo(true)]"/>
+			<munit-tools:verify-call processor="http:request" times="1">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-exceptions"/>
+				</munit-tools:with-attributes>
+			</munit-tools:verify-call>
+		</munit:validation>
+	</munit:test>
+
+</mule>
