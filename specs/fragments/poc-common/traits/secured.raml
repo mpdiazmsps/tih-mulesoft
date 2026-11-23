@@ -1,0 +1,40 @@
+#%RAML 1.0 Trait
+description: |
+  Requires application credentials (API Manager Client ID Enforcement policy) and propagates x-correlation-id.
+  The 401 is returned by the policy, not by the implementation.
+headers:
+  client_id:
+    description: Client ID of the client application registered in Exchange.
+    type: string
+    example: 0123456789abcdef0123456789abcdef
+  client_secret:
+    description: Client secret of the client application.
+    type: string
+    example: fedcba9876543210fedcba9876543210
+  x-correlation-id:
+    description: Correlation identifier. When missing, the API generates one and returns it in errors.
+    type: string
+    required: false
+    example: 0b6f2f0e-4a0c-4d25-9a4c-3d9e6a7b1c2d
+responses:
+  401:
+    description: Missing or invalid credentials.
+    body:
+      application/json:
+        type: !include ../types/errors/ErrorResponse.raml
+        example:
+          code: UNAUTHORIZED
+          message: Invalid client id or secret
+          timestamp: 2026-11-20T12:00:00-06:00
+          retryable: false
+  500:
+    description: Unexpected error.
+    body:
+      application/json:
+        type: !include ../types/errors/ErrorResponse.raml
+        example:
+          code: INTERNAL_ERROR
+          message: Unexpected error
+          correlationId: 0b6f2f0e-4a0c-4d25-9a4c-3d9e6a7b1c2d
+          timestamp: 2026-11-20T12:00:00-06:00
+          retryable: false

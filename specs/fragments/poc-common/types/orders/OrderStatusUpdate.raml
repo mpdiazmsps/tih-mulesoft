@@ -1,0 +1,26 @@
+#%RAML 1.0 DataType
+description: |
+  Status change of a RECEIVED order. On confirmation the lines are sent with their price,
+  and the ERP stores that price as the last price of the provider used.
+type: object
+properties:
+  status:
+    type: string
+    enum: [CONFIRMED, REJECTED]
+  lines:
+    type: array
+    items: !include OrderLine.raml
+    required: false
+    description: Required when status is CONFIRMED.
+  reason:
+    type: string
+    required: false
+    description: Why the order is rejected.
+example:
+  status: CONFIRMED
+  lines:
+    - itemId: 20000000-0000-4000-8000-000000000100
+      quantity: 5
+      unitPrice: 189.00
+      priceSource: LAST_PRICE
+      provider: FAK

@@ -1,0 +1,73 @@
+#%RAML 1.0 Library
+usage: |
+  Shared library of the "Integration in the agentic era" PoC: every common type and trait, in one root file.
+  APIs use it with a single library:
+    uses:
+      common: exchange_modules/<orgId>/poc-common/<version>/poc-common.raml
+  and reference common.<Type> (for example common.Customer) and common.<trait> (for example common.secured).
+  - Each type is a DataType fragment under types/<section>/; a type that uses another one includes it with a relative path.
+  - Each trait is a Trait fragment under traits/.
+  - JSON in camelCase, in English (decision D5). Orders, items, movements and requests use UUID; customers use the
+    18-character Salesforce Id. Currency in ISO 4217 (always MXN). Dates in ISO 8601 with time zone.
+  - Examples use the demo script data (data/). PED-1002 and SKU-100 are readable names for fixed UUIDs.
+
+types:
+  # Identifiers
+  Uuid: !include types/identifiers/Uuid.raml
+  SalesforceId: !include types/identifiers/SalesforceId.raml
+  Currency: !include types/identifiers/Currency.raml
+  Email: !include types/identifiers/Email.raml
+  Phone: !include types/identifiers/Phone.raml
+  # Catalogs
+  ProviderAbv: !include types/catalogs/ProviderAbv.raml
+  Segment: !include types/catalogs/Segment.raml
+  OrderStatus: !include types/catalogs/OrderStatus.raml
+  PriceSource: !include types/catalogs/PriceSource.raml
+  ExceptionType: !include types/catalogs/ExceptionType.raml
+  DispatchStatus: !include types/catalogs/DispatchStatus.raml
+  RequestType: !include types/catalogs/RequestType.raml
+  RequestStatus: !include types/catalogs/RequestStatus.raml
+  SourceStatus: !include types/catalogs/SourceStatus.raml
+  # Customers
+  Address: !include types/customers/Address.raml
+  CustomerRequest: !include types/customers/CustomerRequest.raml
+  Customer: !include types/customers/Customer.raml
+  CustomerSummary: !include types/customers/CustomerSummary.raml
+  # Orders
+  OrderLineRequest: !include types/orders/OrderLineRequest.raml
+  OrderCreateRequest: !include types/orders/OrderCreateRequest.raml
+  OrderLine: !include types/orders/OrderLine.raml
+  Order: !include types/orders/Order.raml
+  OrderStatusUpdate: !include types/orders/OrderStatusUpdate.raml
+  OrderRegisteredEvent: !include types/orders/OrderRegisteredEvent.raml
+  # Inventory
+  ItemProvider: !include types/inventory/ItemProvider.raml
+  InventoryItem: !include types/inventory/InventoryItem.raml
+  InventoryMovementRequest: !include types/inventory/InventoryMovementRequest.raml
+  InventoryMovement: !include types/inventory/InventoryMovement.raml
+  # Quotes
+  QuoteRequest: !include types/quotes/QuoteRequest.raml
+  Quote: !include types/quotes/Quote.raml
+  QuoteResult: !include types/quotes/QuoteResult.raml
+  # Dispatch notes
+  DispatchNoteRequest: !include types/dispatch-notes/DispatchNoteRequest.raml
+  DispatchNote: !include types/dispatch-notes/DispatchNote.raml
+  # Order 360
+  Sources: !include types/order-360/Sources.raml
+  Alternative: !include types/order-360/Alternative.raml
+  Order360: !include types/order-360/Order360.raml
+  OrderException: !include types/order-360/OrderException.raml
+  # Order requests
+  OrderRequestEvent: !include types/order-requests/OrderRequestEvent.raml
+  OrderRequest: !include types/order-requests/OrderRequest.raml
+  # Errors
+  ErrorResponse: !include types/errors/ErrorResponse.raml
+
+traits:
+  secured: !include traits/secured.raml
+  validated: !include traits/validated.raml
+  paged: !include traits/paged.raml
+  not-found: !include traits/not-found.raml
+  conflict: !include traits/conflict.raml
+  bad-gateway: !include traits/bad-gateway.raml
+  retryable: !include traits/retryable.raml

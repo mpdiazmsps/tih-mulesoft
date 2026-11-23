@@ -1,0 +1,34 @@
+#%RAML 1.0 DataType
+description: |
+  An order's dispatch note and its acknowledgment. The status is the folder where the file is.
+  A signed acknowledgment carries who received it and when; a rejection carries its reason.
+type: object
+properties:
+  dispatchNoteId:
+    type: string
+    description: <orderId>-<n>. Reissuing creates the next sequence number.
+  orderId: !include ../identifiers/Uuid.raml
+  sequence:
+    type: integer
+    minimum: 1
+  fileName: string
+  status: !include ../catalogs/DispatchStatus.raml
+  depositedAt: datetime
+  receivedBy:
+    type: string
+    required: false
+  acknowledgedAt:
+    type: datetime
+    required: false
+  reason:
+    type: string
+    required: false
+example:
+  dispatchNoteId: 10000000-0000-4000-8000-000000001004-1
+  orderId: 10000000-0000-4000-8000-000000001004
+  sequence: 1
+  fileName: remision_10000000-0000-4000-8000-000000001004_1.csv
+  status: REJECTED
+  depositedAt: 2026-11-19T10:00:00-06:00
+  acknowledgedAt: 2026-11-19T16:20:00-06:00
+  reason: Dirección incorrecta

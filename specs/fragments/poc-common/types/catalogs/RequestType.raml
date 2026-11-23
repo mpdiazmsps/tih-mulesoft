@@ -1,0 +1,8 @@
+#%RAML 1.0 DataType
+description: |
+  Correction requested on an order.
+  - RESTOCK: restock inventory from a provider.
+  - REISSUE: reissue a rejected dispatch note.
+type: string
+enum: [RESTOCK, REISSUE]
+example: RESTOCK

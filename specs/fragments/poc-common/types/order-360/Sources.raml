@@ -1,0 +1,16 @@
+#%RAML 1.0 DataType
+description: Which sources answered while building a composite response.
+type: object
+properties:
+  erp: !include ../catalogs/SourceStatus.raml
+  crm: !include ../catalogs/SourceStatus.raml
+  logistics: !include ../catalogs/SourceStatus.raml
+  providers:
+    type: string
+    pattern: '^[0-9]+ of [0-9]+$'
+    description: How many of the queried providers returned a quote.
+example:
+  erp: OK
+  crm: OK
+  logistics: OK
+  providers: 3 of 3

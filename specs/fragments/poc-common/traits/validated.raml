@@ -1,0 +1,15 @@
+#%RAML 1.0 Trait
+description: The request may be rejected because of invalid data.
+responses:
+  400:
+    description: Invalid or missing data.
+    body:
+      application/json:
+        type: !include ../types/errors/ErrorResponse.raml
+        example:
+          code: VALIDATION_ERROR
+          message: quantity must be greater than 0
+          correlationId: 0b6f2f0e-4a0c-4d25-9a4c-3d9e6a7b1c2d
+          timestamp: 2026-11-20T12:00:00-06:00
+          retryable: false
+          details: [quantity]

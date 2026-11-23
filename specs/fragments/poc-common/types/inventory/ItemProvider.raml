@@ -1,0 +1,22 @@
+#%RAML 1.0 DataType
+description: A provider of a product. Each product has one or more providers and exactly one preferred.
+type: object
+properties:
+  abv: !include ../catalogs/ProviderAbv.raml
+  externalId:
+    type: integer
+    description: Product id at the provider.
+  preferred: boolean
+  lastPrice:
+    type: number
+    required: false
+    description: Last confirmed price with this provider.
+  lastPriceAt:
+    type: datetime
+    required: false
+example:
+  abv: FAK
+  externalId: 7
+  preferred: true
+  lastPrice: 189.00
+  lastPriceAt: 2026-11-18T10:00:00-06:00

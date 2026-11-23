@@ -1,12 +1,16 @@
 {
-  "name": "tih-raml-validate",
+  "name": "poc-raml-tools",
   "version": "1.0.0",
   "private": true,
-  "description": "Valida los RAML del proyecto TIH con el parser AMF de MuleSoft (webapi-parser).",
+  "description": "Valida y empaqueta para Exchange los RAML de la PoC (webapi-parser) y valida el contrato de herramientas MCP.",
   "scripts": {
-    "validate": "node validate.js ../fragments/tih-common-types.raml ../fragments/tih-common-traits.raml ../xapi-online-store-tih/xapi-online-store-tih.raml ../papi-customers-tih/papi-customers-tih.raml ../papi-orders-tih/papi-orders-tih.raml ../papi-notifications-tih/papi-notifications-tih.raml ../sapi-oracle-core-tih/sapi-oracle-core-tih.raml ../sapi-sftp-orders-tih/sapi-sftp-orders-tih.raml ../sapi-price-providers-tih/sapi-price-providers-tih.raml"
+    "validate": "node validate.js",
+    "package": "node package-exchange.mjs",
+    "validate-tools": "node validate-tools.mjs"
   },
   "dependencies": {
-    "webapi-parser": "^0.5.0"
+    "ajv": "^6.12.6",
+    "webapi-parser": "^0.5.0",
+    "yaml": "^2.6.1"
   }
 }

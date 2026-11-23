@@ -1,0 +1,34 @@
+#%RAML 1.0 DataType
+description: ERP order (ORDERS is the header and ORDER_ITEMS the lines).
+type: object
+properties:
+  orderId: !include ../identifiers/Uuid.raml
+  customerId: !include ../identifiers/SalesforceId.raml
+  status: !include ../catalogs/OrderStatus.raml
+  currency: !include ../identifiers/Currency.raml
+  lines:
+    type: array
+    items: !include OrderLine.raml
+  total:
+    type: number
+    required: false
+    description: Sum of quantity × unitPrice. Only when the order is CONFIRMED.
+  createdAt: datetime
+  updatedAt:
+    type: datetime
+    required: false
+example:
+  orderId: 10000000-0000-4000-8000-000000001002
+  customerId: 003Hs00000CUMBRAAA
+  status: CONFIRMED
+  currency: MXN
+  lines:
+    - itemId: 20000000-0000-4000-8000-000000000100
+      sku: SKU-100
+      quantity: 5
+      unitPrice: 189.00
+      priceSource: LAST_PRICE
+      provider: FAK
+  total: 945.00
+  createdAt: 2026-11-20T09:15:00-06:00
+  updatedAt: 2026-11-20T09:16:00-06:00

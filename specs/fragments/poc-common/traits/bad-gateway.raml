@@ -1,0 +1,14 @@
+#%RAML 1.0 Trait
+description: An external system may respond with an error.
+responses:
+  502:
+    description: Error in an external system (provider, Salesforce or MagicBell).
+    body:
+      application/json:
+        type: !include ../types/errors/ErrorResponse.raml
+        example:
+          code: PROVIDER_ERROR
+          message: The provider returned an error
+          correlationId: 0b6f2f0e-4a0c-4d25-9a4c-3d9e6a7b1c2d
+          timestamp: 2026-11-20T12:00:00-06:00
+          retryable: true

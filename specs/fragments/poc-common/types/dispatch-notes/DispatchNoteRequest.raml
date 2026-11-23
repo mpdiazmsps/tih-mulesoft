@@ -1,0 +1,32 @@
+#%RAML 1.0 DataType
+description: Dispatch note dropped into the pending folder as remision_<orderId>_<n>.csv.
+type: object
+properties:
+  orderId: !include ../identifiers/Uuid.raml
+  customer:
+    type: object
+    properties:
+      name: string
+      address: !include ../customers/Address.raml
+  lines:
+    type: array
+    minItems: 1
+    items:
+      type: object
+      properties:
+        sku: string
+        quantity:
+          type: integer
+          minimum: 1
+example:
+  orderId: 10000000-0000-4000-8000-000000001004
+  customer:
+    name: Grupo Hotelero Tapatío
+    address:
+      street: Av. Vallarta 2000
+      city: Guadalajara
+      state: Jalisco
+      postalCode: '44100'
+  lines:
+    - sku: SKU-200
+      quantity: 1

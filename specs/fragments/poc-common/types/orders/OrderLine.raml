@@ -1,0 +1,29 @@
+#%RAML 1.0 DataType
+description: An order line. Price, price source and provider are filled in on confirmation.
+type: object
+properties:
+  itemId: !include ../identifiers/Uuid.raml
+  sku:
+    type: string
+    required: false
+  quantity:
+    type: integer
+    minimum: 1
+  unitPrice:
+    type: number
+    minimum: 0
+    required: false
+  priceSource:
+    type: !include ../catalogs/PriceSource.raml
+    required: false
+  provider:
+    type: !include ../catalogs/ProviderAbv.raml
+    required: false
+    description: Provider of the price, when the source is LAST_PRICE or QUOTE.
+example:
+  itemId: 20000000-0000-4000-8000-000000000100
+  sku: SKU-100
+  quantity: 5
+  unitPrice: 189.00
+  priceSource: LAST_PRICE
+  provider: FAK

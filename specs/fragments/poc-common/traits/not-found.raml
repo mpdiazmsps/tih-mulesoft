@@ -1,0 +1,14 @@
+#%RAML 1.0 Trait
+description: The requested resource may not exist.
+responses:
+  404:
+    description: Resource not found.
+    body:
+      application/json:
+        type: !include ../types/errors/ErrorResponse.raml
+        example:
+          code: ORDER_NOT_FOUND
+          message: Order not found
+          correlationId: 0b6f2f0e-4a0c-4d25-9a4c-3d9e6a7b1c2d
+          timestamp: 2026-11-20T12:00:00-06:00
+          retryable: false

@@ -1,0 +1,33 @@
+#%RAML 1.0 DataType
+description: |
+  Single error model for every API.
+  Codes: VALIDATION_ERROR, UNAUTHORIZED, FORBIDDEN, CONTACT_NOT_FOUND, ORDER_NOT_FOUND, ITEM_NOT_FOUND,
+  PRODUCT_NOT_FOUND, DISPATCH_NOTE_NOT_FOUND, REQUEST_NOT_FOUND, ORDER_ALREADY_EXISTS, CONTACT_ALREADY_EXISTS, CUSTOMER_ALREADY_EXISTS,
+  INVALID_TRANSITION, INSUFFICIENT_STOCK, PROCESS_ALREADY_RUNNING, PROVIDER_ERROR, SERVICE_UNAVAILABLE,
+  INTERNAL_ERROR.
+type: object
+properties:
+  code:
+    type: string
+    example: ORDER_NOT_FOUND
+  message:
+    type: string
+    example: Order not found
+  correlationId:
+    description: Value of x-correlation-id, to trace the request in the logs.
+    type: string
+    required: false
+  timestamp: datetime
+  retryable:
+    description: true when the consumer may retry the same request later.
+    type: boolean
+  details:
+    description: Optional detail, for example the invalid fields.
+    type: string[]
+    required: false
+example:
+  code: ORDER_NOT_FOUND
+  message: Order not found
+  correlationId: 0b6f2f0e-4a0c-4d25-9a4c-3d9e6a7b1c2d
+  timestamp: 2026-11-20T12:00:00-06:00
+  retryable: false

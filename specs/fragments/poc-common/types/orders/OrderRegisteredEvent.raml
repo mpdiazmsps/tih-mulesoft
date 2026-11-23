@@ -1,0 +1,30 @@
+#%RAML 1.0 DataType
+description: |
+  order.registered event (exchange orders.events). Published only by the regular confirmation cycle,
+  when the order is confirmed with full stock and its dispatch note was sent. Corrections do not publish it (D18).
+type: object
+properties:
+  eventType:
+    type: string
+    enum: [order.registered]
+  orderId: !include ../identifiers/Uuid.raml
+  customerId: !include ../identifiers/SalesforceId.raml
+  currency: !include ../identifiers/Currency.raml
+  lines:
+    type: array
+    items: !include OrderLine.raml
+  total: number
+  occurredAt: datetime
+example:
+  eventType: order.registered
+  orderId: 10000000-0000-4000-8000-000000001003
+  customerId: 003Hs00000CUMBRAAA
+  currency: MXN
+  lines:
+    - itemId: 20000000-0000-4000-8000-000000000200
+      sku: SKU-200
+      quantity: 3
+      unitPrice: 250.00
+      priceSource: LOCAL
+  total: 750.00
+  occurredAt: 2026-11-19T11:00:00-06:00

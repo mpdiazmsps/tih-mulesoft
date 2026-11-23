@@ -1,0 +1,7 @@
+#%RAML 1.0 DataType
+description: |
+  PENDING → APPROVED → APPLYING → COMPLETED or FAILED.
+  From PENDING it can also become REJECTED or EXPIRED.
+type: string
+enum: [PENDING, APPROVED, APPLYING, COMPLETED, FAILED, REJECTED, EXPIRED]
+example: PENDING

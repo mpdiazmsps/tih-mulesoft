@@ -1,0 +1,19 @@
+#%RAML 1.0 Trait
+description: A backend may be unavailable, exceed its timeout or have its circuit open. The consumer may retry.
+responses:
+  503:
+    description: Backend unavailable (Oracle, SFTP, Salesforce, provider or RabbitMQ). Retry later.
+    headers:
+      Retry-After:
+        description: Suggested seconds before retrying.
+        type: integer
+        example: 30
+    body:
+      application/json:
+        type: !include ../types/errors/ErrorResponse.raml
+        example:
+          code: SERVICE_UNAVAILABLE
+          message: Service temporarily unavailable, try again
+          correlationId: 0b6f2f0e-4a0c-4d25-9a4c-3d9e6a7b1c2d
+          timestamp: 2026-11-20T12:00:00-06:00
+          retryable: true

@@ -1,0 +1,16 @@
+#%RAML 1.0 DataType
+description: A transition in the history of a request.
+type: object
+properties:
+  status: !include ../catalogs/RequestStatus.raml
+  actor:
+    type: string
+    description: Client application or person that made the change.
+  at: datetime
+  note:
+    type: string
+    required: false
+example:
+  status: PENDING
+  actor: agente-mcp
+  at: 2026-11-20T12:40:00-06:00

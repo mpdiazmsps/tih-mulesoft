@@ -1,0 +1,31 @@
+#%RAML 1.0 DataType
+description: Data to create a Salesforce Contact. Email or phone is required; papi-customers validates it.
+type: object
+properties:
+  name:
+    type: string
+    minLength: 1
+    maxLength: 120
+  email:
+    type: !include ../identifiers/Email.raml
+    required: false
+  phone:
+    type: !include ../identifiers/Phone.raml
+    required: false
+  segment:
+    type: !include ../catalogs/Segment.raml
+    required: false
+    description: Defaults to REGULAR when not sent.
+  address:
+    type: !include Address.raml
+    required: false
+example:
+  name: Constructora Cumbres
+  email: compras@cumbres.ejemplo.mx
+  phone: '+528181234567'
+  segment: STRATEGIC
+  address:
+    street: Av. Constitución 100
+    city: Monterrey
+    state: Nuevo León
+    postalCode: '64000'

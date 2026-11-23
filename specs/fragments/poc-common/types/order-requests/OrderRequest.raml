@@ -1,0 +1,64 @@
+#%RAML 1.0 DataType
+description: |
+  Correction request on an order. It is stored with a unique key and waits for a person's decision.
+  It expires after 24 h without a decision.
+type: object
+properties:
+  requestId: !include ../identifiers/Uuid.raml
+  orderId: !include ../identifiers/Uuid.raml
+  type: !include ../catalogs/RequestType.raml
+  status: !include ../catalogs/RequestStatus.raml
+  detail:
+    type: object
+    properties:
+      itemId:
+        type: !include ../identifiers/Uuid.raml
+        required: false
+      quantity:
+        type: integer
+        minimum: 1
+        required: false
+      provider:
+        type: !include ../catalogs/ProviderAbv.raml
+        required: false
+      price:
+        type: number
+        required: false
+      currency:
+        type: !include ../identifiers/Currency.raml
+        required: false
+  idempotencyKey: string
+  requestedBy: string
+  requestedAt: datetime
+  expiresAt: datetime
+  decidedBy:
+    type: string
+    required: false
+  decidedAt:
+    type: datetime
+    required: false
+  reason:
+    type: string
+    required: false
+  history:
+    type: array
+    items: !include OrderRequestEvent.raml
+example:
+  requestId: 30000000-0000-4000-8000-000000000042
+  orderId: 10000000-0000-4000-8000-000000001002
+  type: RESTOCK
+  status: PENDING
+  detail:
+    itemId: 20000000-0000-4000-8000-000000000100
+    quantity: 3
+    provider: BOR
+    price: 175.00
+    currency: MXN
+  idempotencyKey: 7f3c2a10-9b4e-4c1d-8e2f-5a6b7c8d9e0f
+  requestedBy: agente-mcp
+  requestedAt: 2026-11-20T12:40:00-06:00
+  expiresAt: 2026-11-21T12:40:00-06:00
+  history:
+    - status: PENDING
+      actor: agente-mcp
+      at: 2026-11-20T12:40:00-06:00

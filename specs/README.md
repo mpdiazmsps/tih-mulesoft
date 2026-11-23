@@ -1,74 +1,81 @@
-# Especificaciones RAML 1.0 (Fase 1)
+# specs: contratos RAML de la PoC
 
-Contratos de las 8 APIs del proyecto TIH, más 2 fragments compartidos. Están escritos y validados localmente; **todavía no se publican** en Design Center ni en Exchange.
+Contrato primero: un cambio de comportamiento empieza aquí. Esta carpeta es la fuente que se edita;
+lo que se publica en Exchange sale de aquí con `package-exchange.mjs`. Ninguna app guarda copia de su contrato.
 
 ```
 specs/
-  fragments/
-    tih-common-types.raml      # tipos compartidos (Customer, OrderRequest, Price, ErrorResponse...)
-    tih-common-traits.raml     # traits: secured, validated, not-found, conflict, retryable...
-  xapi-online-store-tih/xapi-online-store-tih.raml
-  papi-customers-tih/papi-customers-tih.raml
-  papi-orders-tih/papi-orders-tih.raml
-  papi-notifications-tih/papi-notifications-tih.raml
-  sapi-oracle-core-tih/sapi-oracle-core-tih.raml
-  sapi-sftp-orders-tih/sapi-sftp-orders-tih.raml
-  sapi-price-providers-tih/sapi-price-providers-tih.raml
-  tools/                       # validador (webapi-parser)
+  fragments/poc-common/
+    poc-common.raml   # la librería común (main en Exchange): declara cada tipo y cada trait con !include
+    types/            # un fragmento DataType por tipo, en una carpeta por sección:
+      identifiers/  catalogs/  customers/  orders/  inventory/  quotes/
+      dispatch-notes/  order-360/  order-requests/  errors/
+    traits/           # un fragmento Trait por trait: secured, validated, paged, not-found, conflict, bad-gateway, retryable
+  sapi-oracle-core/sapi-oracle-core.raml          # oleada 1
+  sapi-crm/sapi-crm.raml                          # oleada 1
+  sapi-sftp-orders/sapi-sftp-orders.raml          # oleada 1
+  sapi-price-providers/sapi-price-providers.raml  # oleada 1
+  papi-customers/  papi-orders/  papi-order-requests/  papi-notifications/   # oleada 2
+  xapi-online-store/xapi-online-store.raml        # oleada 3: la fachada REST (14 operaciones)
+  mcp-online-store/tools.yaml                     # oleada 3: las 5 herramientas del agente (no es RAML)
+  tools/              # validadores (RAML y tools.yaml) y empaquetador
 ```
 
-El nombre de cada archivo RAML y su `title` coinciden con el nombre de la aplicación, como pide el estándar (§12.3).
+Las carpetas `*-tih` son los contratos de la base, ya reemplazados por los de la PoC; se conservan como referencia y el validador las ignora.
 
-## APIs y recursos
+## Convenciones
 
-| API | Base URI (local) | Recursos |
-|---|---|---|
-| xapi-online-store-tih | `http://localhost:8080/api/v1/online-store` | `POST /customers`, `POST /orders` |
-| papi-customers-tih | `http://localhost:8082/api/v1/customers-management` | `POST /customers`, `GET /customers/{customerId}` |
-| papi-orders-tih | `http://localhost:8083/api/v1/orders-management` | `POST /orders`, `POST /orders/process` |
-| papi-notifications-tih | `http://localhost:8084/api/v1/notifications` | `POST /orders-registered` (más el listener AMQP, que no es HTTP) |
-| sapi-oracle-core-tih | `http://localhost:8091/api/v1/core/store` | `POST/GET /customers`, `GET /customers/{customerId}`, `GET /inventory/items?ids=`, `POST /orders`, `GET /orders/{orderId}` |
-| sapi-sftp-orders-tih | `http://localhost:8092/api/v1/sftp/orders` | `GET /files`, `PUT/GET /files/{fileName}`, `POST /files/{fileName}/move` |
-| sapi-price-providers-tih | `http://localhost:8093/api/v1/price-providers` | `GET /providers/{providerAbv}/products/{externalId}/price` |
+- Todo el contrato va en inglés (D5): campos en camelCase (`orderId`, `lines`, `dispatchNote`), enums (`RECEIVED`, `STOCK_SHORTAGE`), descripciones y `displayName`. Los datos del guion en los ejemplos se quedan como son.
+- Pedidos, artículos y solicitudes se identifican con UUID; el cliente, con el Id de Salesforce de 18 caracteres.
+- Moneda ISO 4217 (siempre `MXN`) y fechas ISO 8601 con zona horaria.
+- `baseUri` genérico y solo HTTPS, como desplegado en CloudHub 2.0: `https://{host}/api/{version}/<ruta>`, con `baseUriParameters.host` (el endpoint público de la app en CloudHub) y `protocols: [HTTPS]`. El contrato no menciona el ambiente local; en local las apps escuchan en HTTP con la misma ruta.
+- Todos los métodos llevan `secured` (`client_id`, `client_secret` y `x-correlation-id`). Los `503` llevan `Retry-After`.
+- Los ejemplos usan los datos del guion (ver `data/README.md`).
 
-## Convenciones del contrato
+Cada archivo de `types/` es un fragmento `#%RAML 1.0 DataType` y cada uno de `traits/` un `#%RAML 1.0 Trait`.
+- Un tipo que usa a otro lo referencia con `!include` y ruta relativa (`segment: !include ../catalogs/Segment.raml`),
+  nunca por su nombre: dentro de un fragmento un nombre suelto no se resuelve y el validador no lo avisa.
+- Un trait toma `ErrorResponse` con `!include ../types/errors/ErrorResponse.raml` (no puede usar `poc-common.raml`: sería un ciclo).
+- Las APIs usan una sola librería: `uses: common: ../fragments/poc-common/poc-common.raml`, y `common.Customer`, `common.secured`.
+- Para agregar un tipo: crear `types/<sección>/<Tipo>.raml` con su cabecera y agregar `<Tipo>: !include ...` en `poc-common.raml`.
 
-- **Seguridad:** todos los métodos usan el trait `secured`: headers `client_id` y `client_secret` (los que espera la política Client ID Enforcement) y `x-correlation-id` opcional. El `401` lo devuelve la política.
-- **Errores:** un único modelo `ErrorResponse` con `code`, `message`, `correlationId`, `timestamp` y `retryable`. Los `503` incluyen el header `Retry-After`.
-- **JSON en camelCase.** Las columnas de Oracle (snake_case) se traducen en `sapi-oracle-core-tih`.
-- **Regla "email o teléfono":** RAML no la puede expresar, la valida `papi-customers-tih`.
-- **Rutas con `/process` y `/move`** en lugar de `:process` y `:move`: un sufijo con dos puntos pegado a un parámetro (`{fileName}:move`) puede confundir al router de APIkit.
-- **Borland (`BOR`)** está en el enum `ProviderAbv` para poder responder `501 PROVIDER_NOT_SUPPORTED`.
+## Validar
 
-### Códigos de error
-
-| Código | HTTP | Uso |
-|---|---|---|
-| `VALIDATION_ERROR` | 400 | Datos inválidos o faltantes |
-| `UNAUTHORIZED` | 401 | Credenciales ausentes o inválidas (política) |
-| `CUSTOMER_NOT_FOUND`, `ORDER_NOT_FOUND`, `FILE_NOT_FOUND`, `PRODUCT_NOT_FOUND` | 404 | Recurso inexistente |
-| `CUSTOMER_ALREADY_EXISTS`, `FILE_ALREADY_EXISTS`, `PROCESS_ALREADY_RUNNING` | 409 | Conflicto con el estado actual |
-| `PROVIDER_NOT_SUPPORTED` | 501 | Proveedor fuera de alcance (BOR) |
-| `PROVIDER_ERROR` | 502 | Un sistema externo respondió con error |
-| `SERVICE_UNAVAILABLE` | 503 | Oracle, SFTP o RabbitMQ no disponibles. `retryable: true` |
-| `INTERNAL_ERROR` | 500 | Error inesperado |
-
-## Validar los RAML
-
-Requiere Node.js. Desde `specs/tools`:
+Requiere Node.js. La primera vez: `npm --prefix specs/tools install`.
 
 ```
-npm install
-npm run validate
+npm --prefix specs/tools run validate
 ```
 
-El validador usa el parser AMF de MuleSoft: comprueba la sintaxis, las referencias a tipos y traits, y que los ejemplos cumplan sus tipos (así el mocking service de Design Center no devuelve datos inválidos).
+Sin argumentos valida el fragmento y cada `specs/<api>/<api>.raml`. Usa el parser AMF de MuleSoft:
+sintaxis, referencias y que los ejemplos cumplan sus tipos.
 
-## Publicar en Design Center y Exchange (cuando lo decidamos)
+El contrato del servidor MCP (`mcp-online-store/tools.yaml`) se valida aparte, con el esquema JSON
+`tools/tools.schema.json` y reglas extra (cinco herramientas, solo `request_correction` escribe y con llave derivada,
+ninguna aprueba ni aplica):
 
-1. En Design Center crear dos proyectos *API Specification Fragment*: `tih-common-types` (Library) y `tih-common-traits` (Library, depende de la anterior) y publicarlos en Exchange.
-2. Crear un proyecto *API Specification* por cada API, con el mismo nombre que la aplicación (RAML 1.0), y pegar el contenido del `.raml`.
-3. Agregar los fragments como dependencias del proyecto y cambiar las rutas del bloque `uses` a las de Exchange, por ejemplo:
-   `types: exchange_modules/<groupId>/tih-common-types/1.0.0/tih-common-types.raml`.
-4. Publicar cada API en Exchange con versión `1.0.0`.
-5. En Studio, importar la especificación desde Exchange y generar el scaffolding (APIkit) en `interface.xml`.
+```
+npm --prefix specs/tools run validate-tools
+```
+
+Gobernanza (opcional, unos 4 minutos por API, usa la CLI de Anypoint):
+
+```
+node specs/tools/package-exchange.mjs --group <orgId> --version 1.0.0 --only <api> --bundle --out tmp/gov
+# descomprimir tmp/gov/<api>-1.0.0.zip en tmp/gov/<api>/ y luego:
+anypoint-cli-v4 governance:api:validate tmp/gov/<api> --rulesets infra/governance/tih-raml-conventions.yaml
+```
+
+## Empaquetar para Exchange
+
+```
+node specs/tools/package-exchange.mjs --group <orgId> --version 1.0.0 [--only <asset>] [--bundle]
+```
+
+Deja un zip por asset en `tmp/exchange/`:
+- `poc-common-<v>.zip`: el fragmento (`classifier: raml-fragment`).
+- `<api>-<v>.zip`: el RAML con los `uses` reescritos a `exchange_modules/<orgId>/poc-common/<v>/...`
+  y `poc-common` declarado como dependencia en `exchange.json`.
+- `--bundle` (plan B): mete el fragmento dentro de cada zip y no declara la dependencia.
+
+Orden de publicación: primero `poc-common`, después las APIs.

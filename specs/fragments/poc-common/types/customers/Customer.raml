@@ -1,0 +1,17 @@
+#%RAML 1.0 DataType
+description: Customer in the common format. Its id is the Salesforce Id.
+type: !include CustomerRequest.raml
+properties:
+  id: !include ../identifiers/SalesforceId.raml
+  segment: !include ../catalogs/Segment.raml
+example:
+  id: 003Hs00000CUMBRAAA
+  name: Constructora Cumbres
+  email: compras@cumbres.ejemplo.mx
+  phone: '+528181234567'
+  segment: STRATEGIC
+  address:
+    street: Av. Constitución 100
+    city: Monterrey
+    state: Nuevo León
+    postalCode: '64000'

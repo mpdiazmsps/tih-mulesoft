@@ -1,0 +1,12 @@
+#%RAML 1.0 DataType
+description: An item requested in an order.
+type: object
+properties:
+  itemId: !include ../identifiers/Uuid.raml
+  quantity:
+    type: integer
+    minimum: 1
+    maximum: 1000
+example:
+  itemId: 20000000-0000-4000-8000-000000000100
+  quantity: 5

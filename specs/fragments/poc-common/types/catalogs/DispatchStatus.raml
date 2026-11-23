@@ -1,0 +1,9 @@
+#%RAML 1.0 DataType
+description: |
+  Status of an order's dispatch note.
+  - PENDING, SIGNED and REJECTED: the logistics folder where the file is.
+  - ON_HOLD: the order has no dispatch note because it is waiting for stock.
+  - UNKNOWN: logistics did not respond.
+type: string
+enum: [PENDING, SIGNED, REJECTED, ON_HOLD, UNKNOWN]
+example: REJECTED

@@ -1,0 +1,15 @@
+#%RAML 1.0 DataType
+description: The minimum customer data attached to an order.
+type: object
+properties:
+  id: !include ../identifiers/SalesforceId.raml
+  name: string
+  segment: !include ../catalogs/Segment.raml
+  city:
+    type: string
+    required: false
+example:
+  id: 003Hs00000CUMBRAAA
+  name: Constructora Cumbres
+  segment: STRATEGIC
+  city: Monterrey

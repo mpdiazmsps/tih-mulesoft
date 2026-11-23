@@ -1,0 +1,33 @@
+#%RAML 1.0 DataType
+description: Quote with several providers. noResponse lists the providers that timed out or failed.
+type: object
+properties:
+  quotes:
+    type: array
+    items: !include Quote.raml
+  noResponse:
+    type: array
+    items:
+      type: object
+      properties:
+        abv: !include ../catalogs/ProviderAbv.raml
+        externalId: integer
+        reason:
+          type: string
+          enum: [TIMEOUT, ERROR, NOT_FOUND, CIRCUIT_OPEN]
+example:
+  quotes:
+    - abv: FAK
+      externalId: 7
+      price: 189.00
+      currency: MXN
+      quotedAt: 2026-11-20T12:00:00-06:00
+    - abv: ESC
+      externalId: 122
+      price: 194.00
+      currency: MXN
+      quotedAt: 2026-11-20T12:00:00-06:00
+  noResponse:
+    - abv: BOR
+      externalId: 3
+      reason: TIMEOUT

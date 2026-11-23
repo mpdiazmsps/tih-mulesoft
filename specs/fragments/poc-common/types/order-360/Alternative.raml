@@ -1,0 +1,35 @@
+#%RAML 1.0 DataType
+description: A way to resolve an order exception.
+type: object
+properties:
+  type: !include ../catalogs/RequestType.raml
+  itemId:
+    type: !include ../identifiers/Uuid.raml
+    required: false
+  sku:
+    type: string
+    required: false
+  quantity:
+    type: integer
+    required: false
+  provider:
+    type: !include ../catalogs/ProviderAbv.raml
+    required: false
+  price:
+    type: number
+    required: false
+  currency:
+    type: !include ../identifiers/Currency.raml
+    required: false
+  cheapest:
+    type: boolean
+    required: false
+example:
+  type: RESTOCK
+  itemId: 20000000-0000-4000-8000-000000000100
+  sku: SKU-100
+  quantity: 3
+  provider: BOR
+  price: 175.00
+  currency: MXN
+  cheapest: true

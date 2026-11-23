@@ -1,0 +1,21 @@
+#%RAML 1.0 DataType
+description: A provider quote in the common format. The currency comes from the provider response.
+type: object
+properties:
+  abv: !include ../catalogs/ProviderAbv.raml
+  externalId: integer
+  name:
+    type: string
+    required: false
+  price:
+    type: number
+    minimum: 0
+  currency: !include ../identifiers/Currency.raml
+  quotedAt: datetime
+example:
+  abv: BOR
+  externalId: 3
+  name: Producto 100
+  price: 175.00
+  currency: MXN
+  quotedAt: 2026-11-20T12:00:00-06:00

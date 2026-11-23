@@ -1,0 +1,39 @@
+#%RAML 1.0 DataType
+description: ERP inventory product with its stock, its local price and its providers.
+type: object
+properties:
+  itemId: !include ../identifiers/Uuid.raml
+  sku: string
+  name: string
+  stock:
+    type: integer
+    minimum: 0
+  localPrice:
+    type: number
+    minimum: 0
+    description: Store price. When it is 0, the price comes from the preferred provider.
+  currency: !include ../identifiers/Currency.raml
+  providers:
+    type: array
+    items: !include ItemProvider.raml
+    required: false
+    description: Included in the batch query (ids).
+example:
+  itemId: 20000000-0000-4000-8000-000000000100
+  sku: SKU-100
+  name: Producto 100
+  stock: 2
+  localPrice: 0
+  currency: MXN
+  providers:
+    - abv: FAK
+      externalId: 7
+      preferred: true
+      lastPrice: 189.00
+      lastPriceAt: 2026-11-18T10:00:00-06:00
+    - abv: ESC
+      externalId: 122
+      preferred: false
+    - abv: BOR
+      externalId: 3
+      preferred: false

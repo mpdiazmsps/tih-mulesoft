@@ -1,0 +1,25 @@
+#%RAML 1.0 DataType
+description: An at-risk order in the exceptions inbox. Strategic customers first, then the oldest orders.
+type: object
+properties:
+  orderId: !include ../identifiers/Uuid.raml
+  type: !include ../catalogs/ExceptionType.raml
+  status: !include ../catalogs/OrderStatus.raml
+  customer:
+    type: !include ../customers/CustomerSummary.raml
+    required: false
+  createdAt: datetime
+  detail:
+    type: string
+    required: false
+example:
+  orderId: 10000000-0000-4000-8000-000000001002
+  type: STOCK_SHORTAGE
+  status: CONFIRMED
+  customer:
+    id: 003Hs00000CUMBRAAA
+    name: Constructora Cumbres
+    segment: STRATEGIC
+    city: Monterrey
+  createdAt: 2026-11-20T09:15:00-06:00
+  detail: SKU-100 ordered 5, available 2

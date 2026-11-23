@@ -1,0 +1,19 @@
+#%RAML 1.0 DataType
+description: Customer delivery address (Salesforce MailingAddress).
+type: object
+properties:
+  street:
+    type: string
+    required: false
+  city: string
+  state:
+    type: string
+    required: false
+  postalCode:
+    type: string
+    required: false
+example:
+  street: Av. Constitución 100
+  city: Monterrey
+  state: Nuevo León
+  postalCode: '64000'

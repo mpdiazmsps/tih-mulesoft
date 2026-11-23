@@ -1,0 +1,9 @@
+#%RAML 1.0 DataType
+description: |
+  Where the unit price of a line came from when the order was confirmed.
+  - LOCAL: the ERP local price (greater than 0).
+  - LAST_PRICE: the last confirmed price of the preferred provider.
+  - QUOTE: a live quote from the preferred provider.
+type: string
+enum: [LOCAL, LAST_PRICE, QUOTE]
+example: LAST_PRICE

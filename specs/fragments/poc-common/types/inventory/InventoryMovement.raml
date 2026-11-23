@@ -1,0 +1,18 @@
+#%RAML 1.0 DataType
+description: A recorded stock movement.
+type: !include InventoryMovementRequest.raml
+properties:
+  movementId: !include ../identifiers/Uuid.raml
+  resultingStock:
+    type: integer
+    minimum: 0
+  createdAt: datetime
+example:
+  movementId: 40000000-0000-4000-8000-000000000001
+  itemId: 20000000-0000-4000-8000-000000000100
+  type: RESTOCK
+  quantity: 3
+  reference: 7f3c2a10-9b4e-4c1d-8e2f-5a6b7c8d9e0f
+  orderId: 10000000-0000-4000-8000-000000001002
+  resultingStock: 5
+  createdAt: 2026-11-20T12:30:00-06:00

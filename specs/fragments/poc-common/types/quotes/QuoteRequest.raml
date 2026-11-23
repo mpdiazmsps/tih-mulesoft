@@ -1,0 +1,9 @@
+#%RAML 1.0 DataType
+description: A product to quote with one provider.
+type: object
+properties:
+  abv: !include ../catalogs/ProviderAbv.raml
+  externalId: integer
+example:
+  abv: BOR
+  externalId: 3
