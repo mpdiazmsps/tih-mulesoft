@@ -1,0 +1,85 @@
+# Configuration for the local environment (the default one). The RabbitMQ user and password live in
+# local-secure-application-config.yaml.
+http:
+  listener:
+    host: "0.0.0.0"
+    port: "8083"
+    basePath: "/api/v1/orders-management"
+
+# APIs this Process API calls. Locally there is no API Manager: any client_id/client_secret works. On CloudHub (T26)
+# these become the credentials of the papi-orders client application, as protected properties.
+clients:
+  clientId: "papi-orders-local"
+  clientSecret: "papi-orders-local"
+papi:
+  customers:
+    protocol: "HTTP"
+    host: "localhost"
+    port: "8082"
+    basePath: "/api/v1/customers-management"
+    timeoutMillis: "8000"
+sapi:
+  oracleCore:
+    protocol: "HTTP"
+    host: "localhost"
+    port: "8091"
+    basePath: "/api/v1/core/store"
+    timeoutMillis: "5000"
+  crm:
+    protocol: "HTTP"
+    host: "localhost"
+    port: "8094"
+    basePath: "/api/v1/crm"
+    timeoutMillis: "8000"
+  sftpOrders:
+    protocol: "HTTP"
+    host: "localhost"
+    port: "8092"
+    basePath: "/api/v1/sftp/orders"
+    timeoutMillis: "8000"
+  priceProviders:
+    protocol: "HTTP"
+    host: "localhost"
+    port: "8093"
+    basePath: "/api/v1/price-providers"
+    # sapi-price-providers answers within 3 s even when a provider is slow (2 s per provider)
+    timeoutMillis: "4000"
+
+# Confirmation cycle (P13): every 60 s, and on demand with POST /orders/process. initialState "stopped" turns the
+# scheduler off (the manual trigger keeps working). The in-memory lock is enough with 1 replica (D16); it expires
+# after lockTtlSeconds in case a cycle dies without releasing it.
+cycle:
+  initialState: "started"
+  startDelayMillis: "20000"
+  frequencyMillis: "60000"
+  lockTtlSeconds: "300"
+  pageSize: "100"
+  # After a failed live quote, that product is not quoted again with that provider for this long. It keeps a product
+  # whose provider always fails (SKU-300 at C) from opening the provider circuit for every other product.
+  quoteBackoffSeconds: "600"
+
+# RabbitMQ (poc-rabbitmq, infra/docker-compose.yml). order.registered goes to exchange orders.events (D8).
+rabbitmq:
+  host: "localhost"
+  port: "5673"
+  virtualHost: "/"
+  exchange: "orders.events"
+  routingKey: "order.registered"
+
+# Order 360, alternatives and exceptions (P03, P06): each branch goes through poc-resilience (sources erp, crm,
+# logistics and providers) with a time limit below 3 s, so the composite answer arrives within 3 s even when a
+# source is down or slow; the missing source is flagged in "sources".
+rs:
+  crm:
+    timeoutMillis: "2000"
+  logistics:
+    timeoutMillis: "2000"
+  # sapi-price-providers answers within 1.5 s per provider; 2.3 s leaves room for the ERP lookup that goes first
+  providers:
+    timeoutMillis: "2300"
+
+currency: "MXN"
+
+# Seconds suggested to the consumer in the Retry-After header when a backend is unavailable
+error:
+  retryAfterSeconds: "30"

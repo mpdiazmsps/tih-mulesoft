@@ -1,6 +1,0 @@
-# Copia como dev-secure-application-config.yaml (ignorado por Git) y completa.
-# Mismos valores que RABBITMQ_APP_USER y RABBITMQ_APP_PASSWORD de infra/rabbitmq/credentials.local.
-# Puedes dejarlos en claro (solo uso local) o cifrarlos como ![...] con tu propia clave (ver README).
-rabbitmq:
-  user: "tih-app"
-  password: "CHANGE_ME"

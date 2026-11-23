@@ -1,0 +1,236 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:os="http://www.mulesoft.org/schema/mule/os"
+	xmlns:amqp="http://www.mulesoft.org/schema/mule/amqp"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/os http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd
+		http://www.mulesoft.org/schema/mule/amqp http://www.mulesoft.org/schema/mule/amqp/current/mule-amqp.xsd
+		http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+		http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+	<!-- Confirmation cycle (P13). For each RECEIVED order:
+	       1. Price: local price, else the last price of the preferred provider, else a live quote from it.
+	          If a line has no price (the provider did not answer), the order stays RECEIVED.
+	       2. PATCH to CONFIRMED with the prices.
+	       3. With full stock: one outbound movement per line (reference <orderId>-out-<itemId>), the dispatch note
+	          and order.registered (D8).
+	       4. With a stock shortage the order stays CONFIRMED and its dispatch note waits.
+	     One order failing does not stop the cycle. Only one cycle runs at a time (in-memory lock, D16). -->
+
+	<!-- ===================================================================== Scheduler (60 s) -->
+	<flow name="cycle-scheduler-flow" initialState="${cycle.initialState}" doc:name="cycle-scheduler-flow"
+		doc:description="Runs the confirmation cycle every minute; skips the round when a cycle is already running">
+		<scheduler doc:name="scheduler-cycle" doc:description="Every cycle.frequencyMillis (60 s)">
+			<scheduling-strategy>
+				<fixed-frequency frequency="${cycle.frequencyMillis}" startDelay="${cycle.startDelayMillis}"/>
+			</scheduling-strategy>
+		</scheduler>
+		<try doc:name="try-scheduled-cycle" doc:description="A running cycle is not an error: this round is skipped">
+			<flow-ref name="cycle-run-subflow" doc:name="flow-ref-cycle-run" doc:description="Takes the lock and processes the RECEIVED orders"/>
+			<error-handler>
+				<on-error-continue type="OS:KEY_ALREADY_EXISTS" logException="false"
+					doc:name="on-error-cycle-running" doc:description="Another cycle holds the lock">
+					<logger level="INFO" message="#[output application/java --- 'INFO - Confirmation cycle skipped: another one is running']"
+						doc:name="logger-cycle-skipped" doc:description="Logs the skipped round"/>
+				</on-error-continue>
+				<on-error-continue type="ANY"
+					doc:name="on-error-cycle-failed" doc:description="The cycle could not start (for example the ERP is down); the next round retries">
+					<logger level="WARN" message="#[output application/java --- 'WARN - Confirmation cycle failed: ' ++ (error.description default '')]"
+						doc:name="logger-cycle-failed" doc:description="Logs the failure"/>
+				</on-error-continue>
+			</error-handler>
+		</try>
+	</flow>
+
+	<!-- ===================================================================== POST /orders/process -->
+	<flow name="cycle-trigger-flow" doc:name="cycle-trigger-flow"
+		doc:description="Starts the confirmation cycle now in the background and answers 202; 409 when one is already running">
+		<os:contains key="cycle" objectStore="cycle-lock-store" doc:name="os-contains-cycle-lock" doc:description="Is a cycle running?"/>
+		<choice doc:name="choice-cycle-running" doc:description="Only one cycle at a time">
+			<when expression="#[payload]" doc:name="when-cycle-running" doc:description="The lock is taken">
+				<raise-error type="APP:PROCESS_ALREADY_RUNNING" description="A confirmation cycle is already running"
+					doc:name="raise-process-already-running" doc:description="Returns 409"/>
+			</when>
+		</choice>
+		<async doc:name="async-cycle" doc:description="The cycle runs in the background; the caller does not wait">
+			<try doc:name="try-triggered-cycle" doc:description="Errors of a background cycle are only logged">
+				<flow-ref name="cycle-run-subflow" doc:name="flow-ref-cycle-run" doc:description="Takes the lock and processes the RECEIVED orders"/>
+				<error-handler>
+					<on-error-continue type="ANY" doc:name="on-error-triggered-cycle" doc:description="Logs a background cycle that could not run">
+						<logger level="WARN" message="#[output application/java --- 'WARN - Triggered confirmation cycle failed: ' ++ (error.description default '')]"
+							doc:name="logger-triggered-cycle-failed" doc:description="Logs the failure"/>
+					</on-error-continue>
+				</error-handler>
+			</try>
+		</async>
+		<ee:transform doc:name="transform-cycle-started" doc:description="STARTED and the moment">
+			<ee:message>
+				<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{ status: "STARTED", startedAt: (now() >> "UTC") as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"} }]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<set-variable variableName="httpStatus" value="#[202]" doc:name="set-http-status-202" doc:description="Cycle started"/>
+	</flow>
+
+	<!-- ===================================================================== The cycle -->
+	<sub-flow name="cycle-run-subflow" doc:name="cycle-run-subflow"
+		doc:description="Takes the lock (OS:KEY_ALREADY_EXISTS when taken), processes every RECEIVED order and always releases the lock">
+		<os:store key="cycle" objectStore="cycle-lock-store" failIfPresent="true" doc:name="os-store-cycle-lock" doc:description="Takes the lock">
+			<os:value><![CDATA[#[output application/java --- now() as String]]]></os:value>
+		</os:store>
+		<try doc:name="try-cycle" doc:description="The lock is released even when the cycle fails">
+			<logger level="INFO" message="#[output application/java --- 'INIT - Confirmation cycle']" doc:name="logger-cycle-start" doc:description="Logs the start of the cycle"/>
+			<http:request method="GET" config-ref="sapi-oracle-core-http-config" path="/orders"
+				doc:name="http-request-received-orders" doc:description="RECEIVED orders, oldest first">
+				<http:query-params>#[output application/java --- { status: 'RECEIVED', size: p('cycle.pageSize') }]</http:query-params>
+			</http:request>
+			<set-variable variableName="cycleOrders" value="#[output application/java --- payload]"
+				doc:name="set-cycle-orders" doc:description="Orders to process in this round"/>
+			<foreach collection="#[vars.cycleOrders]" doc:name="foreach-received-order" doc:description="One order at a time">
+				<set-variable variableName="order" value="#[output application/java --- payload]" doc:name="set-order" doc:description="Order being processed"/>
+				<try doc:name="try-order" doc:description="One order failing does not stop the cycle">
+					<flow-ref name="cycle-order-subflow" doc:name="flow-ref-cycle-order" doc:description="Prices, confirms and dispatches one order"/>
+					<error-handler>
+						<on-error-continue type="ANY" logException="false" doc:name="on-error-order" doc:description="Logs the order and goes on with the next one">
+							<logger level="WARN" message="#[output application/java --- 'WARN - Order ' ++ vars.order.orderId ++ ' not completed: ' ++ (error.errorType.identifier default '') ++ ' ' ++ (error.description default '')]"
+								doc:name="logger-order-failed" doc:description="Logs the order that could not be completed"/>
+						</on-error-continue>
+					</error-handler>
+				</try>
+			</foreach>
+			<logger level="INFO" message="#[output application/java --- 'END - Confirmation cycle, orders: ' ++ sizeOf(vars.cycleOrders)]" doc:name="logger-cycle-end" doc:description="Logs the end of the cycle"/>
+			<os:remove key="cycle" objectStore="cycle-lock-store" doc:name="os-remove-cycle-lock" doc:description="Releases the lock"/>
+			<error-handler>
+				<on-error-propagate type="ANY" logException="false" doc:name="on-error-release-lock" doc:description="Releases the lock and lets the error go on">
+					<try doc:name="try-release-lock" doc:description="Releasing must not hide the original error">
+						<os:remove key="cycle" objectStore="cycle-lock-store" doc:name="os-remove-cycle-lock-on-error" doc:description="Releases the lock"/>
+						<error-handler>
+							<on-error-continue type="ANY" logException="false" doc:name="on-error-release-failed" doc:description="Ignores a failed release (the entry expires)"/>
+						</error-handler>
+					</try>
+				</on-error-propagate>
+			</error-handler>
+		</try>
+	</sub-flow>
+
+	<!-- ===================================================================== One order -->
+	<sub-flow name="cycle-order-subflow" doc:name="cycle-order-subflow" doc:description="Prices, confirms and, with full stock, dispatches vars.order">
+		<http:request method="GET" config-ref="sapi-oracle-core-http-config" path="/inventory/items"
+			doc:name="http-request-order-items" doc:description="Stock, local price and providers of the order items (one batch call)">
+			<http:query-params>#[output application/java --- { ids: vars.order.lines.itemId joinBy ',' }]</http:query-params>
+		</http:request>
+		<set-variable variableName="items" value="#[output application/java --- payload]" doc:name="set-items" doc:description="Inventory of the order items"/>
+		<set-variable variableName="pricedLines" doc:name="set-priced-lines" doc:description="Price of each line without quoting (local or last price)"
+			value="#[output application/java --- do { import priceLines from modules::orders --- priceLines(vars.order.lines, vars.items) }]"/>
+		<set-variable variableName="quotes" value="#[output application/java --- {}]" doc:name="set-quotes" doc:description="Live quote prices by itemId"/>
+		<foreach collection="#[output application/java --- vars.pricedLines filter ((l) -> l.quote != null)]" doc:name="foreach-line-to-quote"
+			doc:description="Only lines without local or last price are quoted live">
+			<set-variable variableName="quoteLine" value="#[output application/java --- payload]" doc:name="set-quote-line" doc:description="Line being quoted"/>
+			<set-variable variableName="backoffKey" value="#[output application/java --- vars.quoteLine.quote.abv ++ '-' ++ vars.quoteLine.quote.externalId]"
+				doc:name="set-backoff-key" doc:description="Provider and product of the quote"/>
+			<os:contains key="#[vars.backoffKey]" objectStore="quote-backoff-store" target="inBackoff"
+				doc:name="os-contains-quote-backoff" doc:description="Did this quote fail recently?"/>
+			<choice doc:name="choice-quote-backoff" doc:description="A recently failed quote is not repeated: the line stays without price">
+				<when expression="#[vars.inBackoff]" doc:name="when-in-backoff" doc:description="Failed less than cycle.quoteBackoffSeconds ago">
+					<logger level="INFO" message="#[output application/java --- 'INFO - Quote ' ++ vars.backoffKey ++ ' skipped: it failed recently (order ' ++ vars.order.orderId ++ ')']"
+						doc:name="logger-quote-skipped" doc:description="Logs the skipped quote"/>
+				</when>
+				<otherwise doc:name="otherwise-quote" doc:description="Quote live">
+					<try doc:name="try-quote" doc:description="A provider that does not answer leaves the line without price">
+						<http:request method="GET" config-ref="sapi-price-providers-http-config"
+							path="#[output application/java --- '/providers/' ++ vars.quoteLine.quote.abv ++ '/products/' ++ vars.quoteLine.quote.externalId ++ '/price']"
+							doc:name="http-request-provider-price" doc:description="Live quote from the preferred provider"/>
+						<set-variable variableName="quotes" value="#[output application/java --- vars.quotes ++ { (vars.quoteLine.itemId): payload.price }]"
+							doc:name="set-quotes-add" doc:description="Keeps the quoted price"/>
+						<error-handler>
+							<on-error-continue type="ANY" logException="false" doc:name="on-error-quote" doc:description="No price for this line; back off this quote">
+								<logger level="WARN" message="#[output application/java --- 'WARN - No quote for item ' ++ vars.quoteLine.itemId ++ ' of order ' ++ vars.order.orderId ++ ': ' ++ (error.errorType.identifier default '')]"
+									doc:name="logger-quote-failed" doc:description="Logs the failed quote"/>
+								<os:store key="#[vars.backoffKey]" objectStore="quote-backoff-store" doc:name="os-store-quote-backoff" doc:description="Do not repeat this quote for a while">
+									<os:value><![CDATA[#[output application/java --- now() as String]]]></os:value>
+								</os:store>
+							</on-error-continue>
+						</error-handler>
+					</try>
+				</otherwise>
+			</choice>
+		</foreach>
+		<set-variable variableName="pricedLines" value="#[output application/java --- do { import applyQuotes from modules::orders --- applyQuotes(vars.pricedLines, vars.quotes) }]"
+			doc:name="set-priced-lines-quoted" doc:description="Lines with the quoted prices"/>
+		<choice doc:name="choice-all-priced" doc:description="Without a price for every line the order stays RECEIVED">
+			<when expression="#[output application/java --- do { import allPriced from modules::orders --- not allPriced(vars.pricedLines) }]"
+				doc:name="when-not-priced" doc:description="A line has no price">
+				<logger level="INFO" message="#[output application/java --- 'INFO - Order ' ++ vars.order.orderId ++ ' stays RECEIVED: a line has no price']"
+					doc:name="logger-order-not-priced" doc:description="The order waits for the next cycle"/>
+			</when>
+			<otherwise doc:name="otherwise-confirm" doc:description="Every line has a price">
+				<flow-ref name="cycle-confirm-subflow" doc:name="flow-ref-cycle-confirm" doc:description="Confirms and, with full stock, dispatches"/>
+			</otherwise>
+		</choice>
+	</sub-flow>
+
+	<sub-flow name="cycle-confirm-subflow" doc:name="cycle-confirm-subflow" doc:description="PATCH to CONFIRMED; with full stock, outbound movements, dispatch note and order.registered">
+		<http:request method="PATCH" config-ref="sapi-oracle-core-http-config" path="#[output application/java --- '/orders/' ++ vars.order.orderId]"
+			doc:name="http-request-confirm-order" doc:description="Confirms the order with the prices; the ERP stores the last price of the provider">
+			<http:body><![CDATA[#[output application/json --- do { import confirmedLines from modules::orders --- { status: 'CONFIRMED', lines: confirmedLines(vars.pricedLines) } }]]]></http:body>
+			<http:response-validator>
+				<http:success-status-code-validator values="200..299,409"/>
+			</http:response-validator>
+		</http:request>
+		<choice doc:name="choice-confirmed" doc:description="409: the order is no longer RECEIVED (someone else changed it)">
+			<when expression="#[attributes.statusCode == 409]" doc:name="when-not-received" doc:description="Nothing else to do">
+				<logger level="INFO" message="#[output application/java --- 'INFO - Order ' ++ vars.order.orderId ++ ' is no longer RECEIVED']"
+					doc:name="logger-order-not-received" doc:description="Skipped"/>
+			</when>
+			<otherwise doc:name="otherwise-confirmed" doc:description="Order CONFIRMED">
+				<set-variable variableName="confirmedOrder" value="#[output application/java --- payload]" doc:name="set-confirmed-order" doc:description="Confirmed order with prices and total"/>
+				<choice doc:name="choice-full-stock" doc:description="D8: only with full stock the dispatch note and the event go out">
+					<when expression="#[output application/java --- do { import fullStock from modules::orders --- fullStock(vars.pricedLines, vars.items) }]"
+						doc:name="when-full-stock" doc:description="Every line has enough stock">
+						<flow-ref name="cycle-dispatch-subflow" doc:name="flow-ref-cycle-dispatch" doc:description="Movements, dispatch note and event"/>
+					</when>
+					<otherwise doc:name="otherwise-shortage" doc:description="Stock shortage: CONFIRMED and the dispatch note waits">
+						<logger level="INFO" message="#[output application/java --- 'INFO - Order ' ++ vars.order.orderId ++ ' CONFIRMED with stock shortage: the dispatch note waits']"
+							doc:name="logger-order-shortage" doc:description="The order appears in the exceptions inbox"/>
+					</otherwise>
+				</choice>
+			</otherwise>
+		</choice>
+	</sub-flow>
+
+	<sub-flow name="cycle-dispatch-subflow" doc:name="cycle-dispatch-subflow" doc:description="Outbound movement per line, dispatch note to logistics and order.registered">
+		<foreach collection="#[vars.pricedLines]" doc:name="foreach-outbound-line" doc:description="One outbound movement per line">
+			<http:request method="POST" config-ref="sapi-oracle-core-http-config" path="/inventory/movements"
+				doc:name="http-request-outbound-movement" doc:description="Outbound movement; the reference makes it happen once (D7)">
+				<http:body><![CDATA[#[output application/json --- { itemId: payload.itemId, 'type': 'OUTBOUND', quantity: payload.quantity, reference: vars.order.orderId ++ '-out-' ++ payload.itemId, orderId: vars.order.orderId }]]]></http:body>
+			</http:request>
+		</foreach>
+		<http:request method="GET" config-ref="papi-customers-http-config" path="#[output application/java --- '/customers/' ++ vars.order.customerId]"
+			doc:name="http-request-dispatch-customer" doc:description="Name and delivery address for the dispatch note"/>
+		<set-variable variableName="customer" value="#[output application/java --- payload]" doc:name="set-customer" doc:description="Customer of the order"/>
+		<http:request method="POST" config-ref="sapi-sftp-orders-http-config" path="/dispatch-notes"
+			doc:name="http-request-dispatch-note" doc:description="Drops the dispatch note into the logistics pending folder">
+			<http:body><![CDATA[#[output application/json --- { orderId: vars.order.orderId, customer: { name: vars.customer.name, address: vars.customer.address }, lines: vars.pricedLines map ((l) -> { sku: l.sku, quantity: l.quantity }) }]]]></http:body>
+		</http:request>
+		<amqp:publish config-ref="rabbitmq-amqp-config" exchangeName="${rabbitmq.exchange}"
+			doc:name="amqp-publish-order-registered" doc:description="order.registered to exchange orders.events (only the regular cycle publishes it, D8)">
+			<amqp:routing-keys>
+				<amqp:routing-key value="${rabbitmq.routingKey}"/>
+			</amqp:routing-keys>
+			<amqp:message>
+				<amqp:body>#[output application/json --- do { import orderRegistered from modules::orders --- orderRegistered(vars.confirmedOrder) }]</amqp:body>
+				<amqp:properties contentType="application/json"/>
+			</amqp:message>
+		</amqp:publish>
+		<logger level="INFO" message="#[output application/java --- 'INFO - Order ' ++ vars.order.orderId ++ ' CONFIRMED and dispatched; order.registered published']"
+			doc:name="logger-order-dispatched" doc:description="Logs the completed order"/>
+	</sub-flow>
+
+</mule>

@@ -1,0 +1,425 @@
+#%RAML 1.0
+title: papi-orders
+version: v1
+baseUri: https://{host}/api/{version}/orders-management
+baseUriParameters:
+  host:
+    description: Public CloudHub 2.0 endpoint of the papi-orders application.
+    type: string
+    example: papi-orders-a1b2c3.usa-e1.cloudhub.io
+protocols: [HTTPS]
+mediaType: application/json
+description: |
+  The heart of the PoC. It registers and confirms orders, composes the Order 360 from every system and applies
+  approved corrections.
+  - Catalog: stock and price. The price is the local one or the last confirmed price of the preferred provider;
+    the catalog never quotes live.
+  - An order is registered as RECEIVED. A confirmation cycle (every 60 s, or `POST /orders/process`) prices each
+    RECEIVED order, confirms it and, with full stock, records the outbound movements, drops the dispatch note and
+    publishes `order.registered`. With a stock shortage the order stays CONFIRMED and its dispatch note waits.
+  - Order 360 and alternatives query the sources in parallel; a source that does not answer is flagged in `sources`
+    and the response still arrives within 3 s.
+  - Corrections are applied once per key (D7) and do not publish `order.registered` (D18).
+
+uses:
+  common: ../fragments/poc-common/poc-common.raml
+
+types:
+  Product:
+    description: A catalog product. Never quoted live.
+    type: object
+    properties:
+      itemId: common.Uuid
+      sku: string
+      name: string
+      stock:
+        type: integer
+        minimum: 0
+      price:
+        type: number
+        required: false
+        description: Missing when the product has neither a local price nor a last price of its preferred provider.
+      currency: common.Currency
+      priceSource:
+        type: string
+        enum: [LOCAL, LAST_PRICE]
+        required: false
+      provider:
+        type: common.ProviderAbv
+        required: false
+        description: Preferred provider, when the price is its last price.
+    example:
+      itemId: 20000000-0000-4000-8000-000000000100
+      sku: SKU-100
+      name: Producto 100
+      stock: 2
+      price: 189.00
+      currency: MXN
+      priceSource: LAST_PRICE
+      provider: FAK
+  NewOrder:
+    description: A new order. papi-orders generates the orderId and validates the customer with papi-customers.
+    type: object
+    properties:
+      customerId: common.SalesforceId
+      lines:
+        type: common.OrderLineRequest[]
+        minItems: 1
+        maxItems: 100
+    example:
+      customerId: 003Hs00000CUMBRAAA
+      lines:
+        - itemId: 20000000-0000-4000-8000-000000000200
+          quantity: 2
+  OrderReceipt:
+    description: The order registered as RECEIVED. The confirmation cycle prices and confirms it later.
+    type: object
+    properties:
+      orderId: common.Uuid
+      status: common.OrderStatus
+      createdAt: datetime
+    example:
+      orderId: 10000000-0000-4000-8000-000000001006
+      status: RECEIVED
+      createdAt: 2026-11-20T13:00:00-06:00
+  CycleStarted:
+    description: The confirmation cycle was started in the background.
+    type: object
+    properties:
+      status:
+        type: string
+        enum: [STARTED]
+      startedAt: datetime
+    example:
+      status: STARTED
+      startedAt: 2026-11-20T13:00:05-06:00
+  ProviderQuote:
+    description: A provider quote for the missing quantity.
+    type: object
+    properties:
+      provider: common.ProviderAbv
+      price: number
+      cheapest:
+        type: boolean
+        required: false
+    example:
+      provider: BOR
+      price: 175.00
+      cheapest: true
+  Alternatives:
+    description: |
+      How to resolve an order exception.
+      - RESTOCK (stock shortage): the missing quantity with the quotes of every provider and the cheapest one.
+      - REISSUE (rejected dispatch note): reissue the dispatch note with the next sequence number.
+    type: object
+    properties:
+      orderId: common.Uuid
+      type: common.RequestType
+      itemId:
+        type: common.Uuid
+        required: false
+      sku:
+        type: string
+        required: false
+      shortage:
+        type: integer
+        required: false
+        description: Units missing (RESTOCK).
+      currency:
+        type: common.Currency
+        required: false
+      quotes:
+        type: ProviderQuote[]
+        required: false
+      cheapest:
+        type: common.Alternative
+        required: false
+        description: The proposed correction (RESTOCK with the cheapest provider, or REISSUE).
+      reason:
+        type: string
+        required: false
+        description: Rejection reason of the dispatch note (REISSUE).
+      providers:
+        type: string
+        pattern: '^[0-9]+ of [0-9]+$'
+        required: false
+        description: How many providers returned a quote (RESTOCK).
+    example:
+      orderId: 10000000-0000-4000-8000-000000001002
+      type: RESTOCK
+      itemId: 20000000-0000-4000-8000-000000000100
+      sku: SKU-100
+      shortage: 3
+      currency: MXN
+      quotes:
+        - provider: FAK
+          price: 189.00
+        - provider: ESC
+          price: 194.00
+        - provider: BOR
+          price: 175.00
+          cheapest: true
+      cheapest:
+        type: RESTOCK
+        itemId: 20000000-0000-4000-8000-000000000100
+        sku: SKU-100
+        quantity: 3
+        provider: BOR
+        price: 175.00
+        currency: MXN
+        cheapest: true
+      providers: 3 of 3
+  CorrectionRequest:
+    description: |
+      An approved correction, sent by papi-order-requests with the key of the request.
+      RESTOCK needs itemId, provider and quantity; REISSUE needs nothing else.
+    type: object
+    properties:
+      type: common.RequestType
+      key:
+        type: string
+        minLength: 1
+        maxLength: 100
+        description: Idempotency key of the request. Repeating it returns the same result without moving anything (D7).
+      itemId:
+        type: common.Uuid
+        required: false
+      provider:
+        type: common.ProviderAbv
+        required: false
+      quantity:
+        type: integer
+        minimum: 1
+        required: false
+    example:
+      type: RESTOCK
+      key: 7f3c2a10-9b4e-4c1d-8e2f-5a6b7c8d9e0f
+      itemId: 20000000-0000-4000-8000-000000000100
+      provider: BOR
+      quantity: 3
+  CorrectionResult:
+    description: What the correction did.
+    type: object
+    properties:
+      orderId: common.Uuid
+      type: common.RequestType
+      key: string
+      restock:
+        type: common.InventoryMovement
+        required: false
+        description: Restock movement (RESTOCK).
+      outbound:
+        type: common.InventoryMovement[]
+        required: false
+        description: Outbound movements of the order lines (RESTOCK).
+      dispatchNote: common.DispatchNote
+    example:
+      orderId: 10000000-0000-4000-8000-000000001002
+      type: RESTOCK
+      key: 7f3c2a10-9b4e-4c1d-8e2f-5a6b7c8d9e0f
+      restock:
+        movementId: 40000000-0000-4000-8000-000000000001
+        itemId: 20000000-0000-4000-8000-000000000100
+        type: RESTOCK
+        quantity: 3
+        reference: 7f3c2a10-9b4e-4c1d-8e2f-5a6b7c8d9e0f
+        orderId: 10000000-0000-4000-8000-000000001002
+        resultingStock: 5
+        createdAt: 2026-11-20T12:45:00Z
+      outbound:
+        - movementId: 40000000-0000-4000-8000-000000000002
+          itemId: 20000000-0000-4000-8000-000000000100
+          type: OUTBOUND
+          quantity: 5
+          reference: 7f3c2a10-9b4e-4c1d-8e2f-5a6b7c8d9e0f-out-20000000-0000-4000-8000-000000000100
+          orderId: 10000000-0000-4000-8000-000000001002
+          resultingStock: 0
+          createdAt: 2026-11-20T12:45:01Z
+      dispatchNote:
+        dispatchNoteId: 10000000-0000-4000-8000-000000001002-1
+        orderId: 10000000-0000-4000-8000-000000001002
+        sequence: 1
+        fileName: remision_10000000-0000-4000-8000-000000001002_1.csv
+        status: PENDING
+        depositedAt: 2026-11-20T12:45:02Z
+
+/products:
+  get:
+    displayName: Catalog
+    description: Products with stock and price (local price, or the last price of the preferred provider). Never quotes live.
+    is: [common.secured, common.validated, common.paged, common.retryable]
+    responses:
+      200:
+        description: A page of the catalog.
+        body:
+          application/json:
+            type: Product[]
+
+/orders:
+  get:
+    displayName: List orders
+    description: Orders by status and from a date, oldest first.
+    is: [common.secured, common.validated, common.paged, common.retryable]
+    queryParameters:
+      status:
+        type: common.OrderStatus
+        required: false
+      from:
+        type: datetime
+        required: false
+        description: Orders created at or after this moment.
+        example: 2026-11-18T00:00:00-06:00
+    responses:
+      200:
+        description: Orders found (the list may be empty).
+        body:
+          application/json:
+            type: common.Order[]
+  post:
+    displayName: Register order
+    description: |
+      Validates the customer and registers the order in the ERP as RECEIVED. Answers in less than 1 s;
+      the confirmation cycle prices and confirms it later.
+    is: [common.secured, common.validated, common.bad-gateway, common.retryable]
+    body:
+      application/json:
+        type: NewOrder
+    responses:
+      201:
+        description: Order registered as RECEIVED.
+        body:
+          application/json:
+            type: OrderReceipt
+
+  /process:
+    post:
+      displayName: Run the confirmation cycle
+      description: Starts the confirmation cycle now instead of waiting for the next minute. Answers 202 at once.
+      is: [common.secured, common.retryable]
+      responses:
+        202:
+          description: Cycle started.
+          body:
+            application/json:
+              type: CycleStarted
+        409:
+          description: A cycle is already running (database lock).
+          body:
+            application/json:
+              type: common.ErrorResponse
+              example:
+                code: PROCESS_ALREADY_RUNNING
+                message: A confirmation cycle is already running
+                correlationId: 0b6f2f0e-4a0c-4d25-9a4c-3d9e6a7b1c2d
+                timestamp: 2026-11-20T12:00:00-06:00
+                retryable: true
+
+  /exceptions:
+    get:
+      displayName: Orders at risk
+      description: |
+        Open orders with an exception (STOCK_SHORTAGE, UNCONFIRMED or DISPATCH_REJECTED), with one batch call per
+        source. STRATEGIC customers first, then the oldest orders.
+      is: [common.secured, common.validated, common.retryable]
+      queryParameters:
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 20
+          required: false
+      responses:
+        200:
+          description: Prioritized exceptions (the list may be empty).
+          body:
+            application/json:
+              type: common.OrderException[]
+              example:
+                - orderId: 10000000-0000-4000-8000-000000001002
+                  type: STOCK_SHORTAGE
+                  status: CONFIRMED
+                  customer:
+                    id: 003Hs00000CUMBRAAA
+                    name: Constructora Cumbres
+                    segment: STRATEGIC
+                    city: Monterrey
+                  createdAt: 2026-11-18T09:15:00-06:00
+                  detail: SKU-100 ordered 5, available 2
+                - orderId: 10000000-0000-4000-8000-000000001004
+                  type: DISPATCH_REJECTED
+                  status: CONFIRMED
+                  customer:
+                    id: 003Hs00000TAPATAAA
+                    name: Grupo Hotelero Tapatío
+                    segment: STRATEGIC
+                    city: Guadalajara
+                  createdAt: 2026-11-18T15:30:00-06:00
+                  detail: Dirección incorrecta
+
+  /{orderId}:
+    uriParameters:
+      orderId:
+        type: common.Uuid
+    get:
+      displayName: Order 360
+      description: |
+        The order seen from the ERP, the CRM, logistics and, with a shortage, the providers, queried in parallel.
+        A source that does not answer is flagged in `sources` and the response still arrives within 3 s.
+      is: [common.secured, common.not-found, common.retryable]
+      responses:
+        200:
+          description: Order 360.
+          body:
+            application/json:
+              type: common.Order360
+
+    /alternatives:
+      get:
+        displayName: Quoted alternatives
+        description: |
+          RESTOCK with the quotes of every provider for the missing quantity and the cheapest one, or REISSUE when the
+          dispatch note was rejected. Answers within 3 s even when a provider is slow (it then shows "2 of 3").
+        is: [common.secured, common.not-found, common.retryable]
+        responses:
+          200:
+            description: Alternatives of the order exception.
+            body:
+              application/json:
+                type: Alternatives
+          409:
+            description: The order has no exception to resolve.
+            body:
+              application/json:
+                type: common.ErrorResponse
+                example:
+                  code: ORDER_WITHOUT_EXCEPTION
+                  message: The order has no stock shortage or rejected dispatch note
+                  correlationId: 0b6f2f0e-4a0c-4d25-9a4c-3d9e6a7b1c2d
+                  timestamp: 2026-11-20T12:00:00-06:00
+                  retryable: false
+
+    /corrections:
+      post:
+        displayName: Apply approved correction
+        description: |
+          Called by papi-order-requests after a person approves.
+          - RESTOCK: records the restock with reference = key, the outbound movement of each line with
+            reference = key + "-out-" + itemId, and drops the dispatch note.
+          - REISSUE: drops the dispatch note with the next sequence number.
+          Neither publishes `order.registered` (D18). Repeating the key returns 200 with the same result and moves
+          nothing (D7).
+        is: [common.secured, common.validated, common.not-found, common.conflict, common.retryable]
+        body:
+          application/json:
+            type: CorrectionRequest
+        responses:
+          201:
+            description: Correction applied.
+            body:
+              application/json:
+                type: CorrectionResult
+          200:
+            description: The key was already applied; same result, nothing moved again.
+            body:
+              application/json:
+                type: CorrectionResult

@@ -1,0 +1,248 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:os="http://www.mulesoft.org/schema/mule/os"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:munit="http://www.mulesoft.org/schema/mule/munit"
+	xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/os http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd
+		http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+		http://www.mulesoft.org/schema/mule/munit http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+		http://www.mulesoft.org/schema/mule/munit-tools http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd">
+
+	<!-- End-to-end HTTP tests of part B: real listener (8083), APIkit with the Exchange contract and the global
+	     error handler. Downstream APIs are mocked. -->
+	<munit:config name="order360-http-test.xml"/>
+
+	<munit:before-suite name="order360-http-warm-up" description="APIkit routes and the branch read flows need a static reference">
+		<choice>
+			<when expression="#[false]">
+				<flow-ref name="get:\orders\exceptions:papi-orders-config"/>
+				<flow-ref name="get:\orders\(orderId):papi-orders-config"/>
+				<flow-ref name="get:\orders\(orderId)\alternatives:papi-orders-config"/>
+				<flow-ref name="o360-crm-read-subflow"/>
+				<flow-ref name="o360-logistics-read-subflow"/>
+				<flow-ref name="o360-quotes-read-subflow"/>
+				<flow-ref name="ex-crm-read-subflow"/>
+				<flow-ref name="ex-logistics-read-subflow"/>
+			</when>
+		</choice>
+	</munit:before-suite>
+
+	<http:request-config name="test-api-client-b" doc:name="HTTP Request configuration">
+		<http:request-connection host="localhost" port="8083"/>
+	</http:request-config>
+
+	<flow name="api-mock-ex-dispatch-flow">
+		<set-payload value="#[output application/java --- []]"/>
+	</flow>
+
+	<munit:test name="api_order360_ped1002_returns200" description="GET /orders/{orderId} returns the Order 360 of PED-1002">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="papi-orders-main"/>
+		</munit:enable-flow-sources>
+		<munit:behavior>
+			<munit-tools:mock-when processor="http:request">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-o360-order"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/json --- { orderId: '10000000-0000-4000-8000-000000001002', customerId: '003Hs00000CUMBRAAA', status: 'CONFIRMED', currency: 'MXN', lines: [ { itemId: '20000000-0000-4000-8000-000000000100', sku: 'SKU-100', quantity: 5, unitPrice: 189, priceSource: 'LAST_PRICE', provider: 'FAK' } ], createdAt: '2026-11-18T16:30:00Z' }]" mediaType="application/json"/>
+					<munit-tools:attributes value="#[{ statusCode: 200, headers: { 'content-type': 'application/json' } }]"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit-tools:mock-when processor="http:request">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-o360-items"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/json --- [ { itemId: '20000000-0000-4000-8000-000000000100', sku: 'SKU-100', name: 'Producto 100', stock: 2, localPrice: 0, currency: 'MXN', providers: [ { abv: 'FAK', externalId: 7, preferred: true, lastPrice: 189 }, { abv: 'ESC', externalId: 122, preferred: false }, { abv: 'BOR', externalId: 3, preferred: false } ] } ]]" mediaType="application/json"/>
+					<munit-tools:attributes value="#[{ statusCode: 200, headers: { 'content-type': 'application/json' } }]"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit-tools:mock-when processor="http:request">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-o360-contact"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/json --- { id: '003Hs00000CUMBRAAA', name: 'Constructora Cumbres', segment: 'STRATEGIC', address: { city: 'Monterrey' } }]" mediaType="application/json"/>
+					<munit-tools:attributes value="#[{ statusCode: 200, headers: { 'content-type': 'application/json' } }]"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit-tools:mock-when processor="http:request">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-o360-dispatch"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/json --- { code: 'DISPATCH_NOTE_NOT_FOUND' }]" mediaType="application/json"/>
+					<munit-tools:attributes value="#[{ statusCode: 404, headers: { 'content-type': 'application/json' } }]"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit-tools:mock-when processor="http:request">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-o360-quotes"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/json --- { quotes: [ { abv: 'FAK', externalId: 7, price: 189, currency: 'MXN', quotedAt: '2026-11-22T10:00:00Z' }, { abv: 'ESC', externalId: 122, price: 194, currency: 'MXN', quotedAt: '2026-11-22T10:00:00Z' }, { abv: 'BOR', externalId: 3, price: 175, currency: 'MXN', quotedAt: '2026-11-22T10:00:00Z' } ], noResponse: [] }]" mediaType="application/json"/>
+					<munit-tools:attributes value="#[{ statusCode: 200, headers: { 'content-type': 'application/json' } }]"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+		</munit:behavior>
+		<munit:execution>
+			<http:request method="GET" config-ref="test-api-client-b" path="/api/v1/orders-management/orders/10000000-0000-4000-8000-000000001002">
+				<http:headers><![CDATA[#[{ client_id: 'test-id', client_secret: 'test-secret' }]]]></http:headers>
+				<http:response-validator><http:success-status-code-validator values="0..599"/></http:response-validator>
+			</http:request>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[output application/java --- attributes.statusCode]" is="#[MunitTools::equalTo(200)]"/>
+			<munit-tools:assert-that expression="#[output application/java --- payload.exceptions]" is="#[MunitTools::equalTo(['STOCK_SHORTAGE'])]"/>
+			<munit-tools:assert-that expression="#[output application/java --- payload.sources.providers]" is="#[MunitTools::equalTo('3 of 3')]"/>
+		</munit:validation>
+	</munit:test>
+
+	<munit:test name="api_order360_unknown_returns404" description="An unknown order returns 404 ORDER_NOT_FOUND">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="papi-orders-main"/>
+		</munit:enable-flow-sources>
+		<munit:behavior>
+			<munit-tools:mock-when processor="http:request">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-o360-order"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/json --- { code: 'ORDER_NOT_FOUND' }]" mediaType="application/json"/>
+					<munit-tools:attributes value="#[{ statusCode: 404, headers: { 'content-type': 'application/json' } }]"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+		</munit:behavior>
+		<munit:execution>
+			<http:request method="GET" config-ref="test-api-client-b" path="/api/v1/orders-management/orders/10000000-0000-4000-8000-000000009999">
+				<http:headers><![CDATA[#[{ client_id: 'test-id', client_secret: 'test-secret' }]]]></http:headers>
+				<http:response-validator><http:success-status-code-validator values="0..599"/></http:response-validator>
+			</http:request>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[output application/java --- attributes.statusCode]" is="#[MunitTools::equalTo(404)]"/>
+			<munit-tools:assert-that expression="#[output application/java --- payload.code]" is="#[MunitTools::equalTo('ORDER_NOT_FOUND')]"/>
+		</munit:validation>
+	</munit:test>
+
+	<munit:test name="api_alternatives_ped1003_returns409" description="An order without exception returns 409 ORDER_WITHOUT_EXCEPTION">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="papi-orders-main"/>
+		</munit:enable-flow-sources>
+		<munit:behavior>
+			<munit-tools:mock-when processor="http:request">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-o360-order"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/json --- { orderId: '10000000-0000-4000-8000-000000001003', customerId: '003Hs00000CUMBRAAA', status: 'CONFIRMED', currency: 'MXN', lines: [ { itemId: '20000000-0000-4000-8000-000000000200', sku: 'SKU-200', quantity: 3, unitPrice: 250, priceSource: 'LOCAL' } ], createdAt: '2026-11-18T18:00:00Z' }]" mediaType="application/json"/>
+					<munit-tools:attributes value="#[{ statusCode: 200, headers: { 'content-type': 'application/json' } }]"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit-tools:mock-when processor="http:request">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-o360-items"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/json --- [ { itemId: '20000000-0000-4000-8000-000000000200', sku: 'SKU-200', name: 'Producto 200', stock: 40, localPrice: 250, currency: 'MXN', providers: [ { abv: 'FAK', externalId: 8, preferred: true }, { abv: 'ESC', externalId: 123, preferred: false }, { abv: 'BOR', externalId: 4, preferred: false } ] } ]]" mediaType="application/json"/>
+					<munit-tools:attributes value="#[{ statusCode: 200, headers: { 'content-type': 'application/json' } }]"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit-tools:mock-when processor="http:request">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-o360-contact"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/json --- { id: '003Hs00000CUMBRAAA', name: 'Constructora Cumbres', segment: 'STRATEGIC', address: { city: 'Monterrey' } }]" mediaType="application/json"/>
+					<munit-tools:attributes value="#[{ statusCode: 200, headers: { 'content-type': 'application/json' } }]"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit-tools:mock-when processor="http:request">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-o360-dispatch"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/json --- { dispatchNoteId: '10000000-0000-4000-8000-000000001003-1', orderId: '10000000-0000-4000-8000-000000001003', sequence: 1, fileName: 'remision_10000000-0000-4000-8000-000000001003_1.csv', status: 'SIGNED', depositedAt: '2026-11-18T12:05:00-06:00' }]" mediaType="application/json"/>
+					<munit-tools:attributes value="#[{ statusCode: 200, headers: { 'content-type': 'application/json' } }]"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit-tools:mock-when processor="http:request">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-o360-quotes"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/json --- { quotes: [ { abv: 'FAK', externalId: 7, price: 189, currency: 'MXN', quotedAt: '2026-11-22T10:00:00Z' }, { abv: 'ESC', externalId: 122, price: 194, currency: 'MXN', quotedAt: '2026-11-22T10:00:00Z' }, { abv: 'BOR', externalId: 3, price: 175, currency: 'MXN', quotedAt: '2026-11-22T10:00:00Z' } ], noResponse: [] }]" mediaType="application/json"/>
+					<munit-tools:attributes value="#[{ statusCode: 200, headers: { 'content-type': 'application/json' } }]"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+		</munit:behavior>
+		<munit:execution>
+			<http:request method="GET" config-ref="test-api-client-b" path="/api/v1/orders-management/orders/10000000-0000-4000-8000-000000001003/alternatives">
+				<http:headers><![CDATA[#[{ client_id: 'test-id', client_secret: 'test-secret' }]]]></http:headers>
+				<http:response-validator><http:success-status-code-validator values="0..599"/></http:response-validator>
+			</http:request>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[output application/java --- attributes.statusCode]" is="#[MunitTools::equalTo(409)]"/>
+			<munit-tools:assert-that expression="#[output application/java --- payload.code]" is="#[MunitTools::equalTo('ORDER_WITHOUT_EXCEPTION')]"/>
+		</munit:validation>
+	</munit:test>
+
+	<munit:test name="api_exceptions_returns200" description="GET /orders/exceptions returns the inbox">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="papi-orders-main"/>
+		</munit:enable-flow-sources>
+		<munit:behavior>
+			<munit-tools:mock-when processor="http:request">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-ex-orders"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/json --- [ { orderId: '10000000-0000-4000-8000-000000001001', customerId: '003Hs00000ANGELAAA', status: 'RECEIVED', currency: 'MXN', lines: [ { itemId: '20000000-0000-4000-8000-000000000300', sku: 'SKU-300', quantity: 2 } ], createdAt: '2026-11-18T15:00:00Z' } ]]" mediaType="application/json"/>
+					<munit-tools:attributes value="#[{ statusCode: 200, headers: { 'content-type': 'application/json' } }]"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit-tools:mock-when processor="http:request">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-ex-items"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/json --- [ { itemId: '20000000-0000-4000-8000-000000000300', sku: 'SKU-300', name: 'Producto 300', stock: 15, localPrice: 0, currency: 'MXN', providers: [ { abv: 'BOR', externalId: 5, preferred: true } ] } ]]" mediaType="application/json"/>
+					<munit-tools:attributes value="#[{ statusCode: 200, headers: { 'content-type': 'application/json' } }]"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit-tools:mock-when processor="http:request">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-ex-contacts"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/json --- [ { id: '003Hs00000ANGELAAA', name: 'Ferretería Angelópolis', segment: 'REGULAR', address: { city: 'Puebla' } } ]]" mediaType="application/json"/>
+					<munit-tools:attributes value="#[{ statusCode: 200, headers: { 'content-type': 'application/json' } }]"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit-tools:mock-when processor="http:request">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-ex-dispatch-notes"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-call flow="api-mock-ex-dispatch-flow"/>
+			</munit-tools:mock-when>
+		</munit:behavior>
+		<munit:execution>
+			<http:request method="GET" config-ref="test-api-client-b" path="/api/v1/orders-management/orders/exceptions?limit=5">
+				<http:headers><![CDATA[#[{ client_id: 'test-id', client_secret: 'test-secret' }]]]></http:headers>
+				<http:response-validator><http:success-status-code-validator values="0..599"/></http:response-validator>
+			</http:request>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[output application/java --- attributes.statusCode]" is="#[MunitTools::equalTo(200)]"/>
+			<munit-tools:assert-that expression="#[output application/java --- payload[0].&quot;type&quot;]" is="#[MunitTools::equalTo('UNCONFIRMED')]"/>
+		</munit:validation>
+	</munit:test>
+
+</mule>

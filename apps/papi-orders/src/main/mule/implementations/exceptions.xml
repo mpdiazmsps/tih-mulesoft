@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+		http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+	<!-- Exceptions inbox: open orders at risk with one batch call per source (never one call per order).
+	     STRATEGIC customers first, then the oldest orders. -->
+
+	<flow name="exceptions-get-flow" doc:name="exceptions-get-flow"
+		doc:description="Open orders with STOCK_SHORTAGE, UNCONFIRMED or DISPATCH_REJECTED, prioritized by customer segment and age">
+		<set-variable variableName="limit" value="#[output application/java --- (attributes.queryParams.limit default 20) as Number]"
+			doc:name="set-limit" doc:description="Maximum entries (the HTTP calls replace the attributes)"/>
+		<http:request method="GET" config-ref="sapi-oracle-core-http-config" path="/orders"
+			doc:name="http-request-ex-orders" doc:description="ERP orders (one call); the open ones are RECEIVED or CONFIRMED">
+			<http:headers>#[output application/java --- { 'x-correlation-id': correlationId }]</http:headers>
+			<http:query-params>#[output application/java --- { size: 100 }]</http:query-params>
+		</http:request>
+		<set-variable variableName="openOrders" value="#[output application/java --- payload filter ((o) -> ['RECEIVED', 'CONFIRMED'] contains o.status)]"
+			doc:name="set-open-orders" doc:description="Orders that are not REJECTED"/>
+		<choice doc:name="choice-any-open" doc:description="Without open orders there is nothing else to read">
+			<when expression="#[isEmpty(vars.openOrders)]" doc:name="when-no-open-orders" doc:description="Empty inbox">
+				<set-payload value="#[output application/json --- []]" doc:name="set-payload-empty-inbox" doc:description="No exceptions"/>
+			</when>
+			<otherwise doc:name="otherwise-open-orders" doc:description="Batch reads of inventory, CRM and logistics">
+				<http:request method="GET" config-ref="sapi-oracle-core-http-config" path="/inventory/items"
+					doc:name="http-request-ex-items" doc:description="Stock of every item of the open orders (one batch call)">
+					<http:headers>#[output application/java --- { 'x-correlation-id': correlationId }]</http:headers>
+					<http:query-params>#[output application/java --- { ids: (flatten(vars.openOrders.lines).itemId distinctBy $) joinBy ',' }]</http:query-params>
+				</http:request>
+				<set-variable variableName="items" value="#[output application/java --- payload]" doc:name="set-items" doc:description="Inventory of the open orders"/>
+				<scatter-gather doc:name="scatter-gather-ex-sources" doc:description="CRM and logistics in parallel, each through resilience-call">
+					<route>
+						<set-variable variableName="rsSource" value="crm" doc:name="set-rs-source-crm" doc:description="CRM source"/>
+						<set-variable variableName="rsFlow" value="ex-crm-read-subflow" doc:name="set-rs-flow-crm" doc:description="Contacts of the open orders"/>
+						<flow-ref name="resilience-call" doc:name="flow-ref-resilience-crm" doc:description="Circuit breaker and one retry on connectivity"/>
+						<set-payload value="#[output application/java --- vars.rsResult]" doc:name="set-payload-crm-result" doc:description="Result of the CRM branch"/>
+					</route>
+					<route>
+						<set-variable variableName="rsSource" value="logistics" doc:name="set-rs-source-logistics" doc:description="Logistics source"/>
+						<set-variable variableName="rsFlow" value="ex-logistics-read-subflow" doc:name="set-rs-flow-logistics" doc:description="Dispatch notes by status"/>
+						<flow-ref name="resilience-call" doc:name="flow-ref-resilience-logistics" doc:description="Circuit breaker and one retry on connectivity"/>
+						<set-payload value="#[output application/java --- vars.rsResult]" doc:name="set-payload-logistics-result" doc:description="Result of the logistics branch"/>
+					</route>
+				</scatter-gather>
+				<ee:transform doc:name="transform-exceptions-inbox" doc:description="One entry per order exception, STRATEGIC first and then the oldest">
+					<ee:message>
+						<ee:set-payload><![CDATA[%dw 2.0
+import exceptionsInbox from modules::order360
+output application/json
+var logistics = payload['1'].payload
+// The logistics branch returns the three folders together; split them back into one result per status
+var listings = if (logistics.ok default false) (logistics.payload map ((l) -> { ok: true, payload: l })) else [ { ok: false } ]
+---
+exceptionsInbox(vars.openOrders, vars.items, payload['0'].payload, listings, vars.limit)]]></ee:set-payload>
+					</ee:message>
+				</ee:transform>
+			</otherwise>
+		</choice>
+	</flow>
+
+	<!-- ================================================================= Branch read flows (rsFlow) -->
+	<sub-flow name="ex-crm-read-subflow" doc:name="ex-crm-read-subflow" doc:description="The contacts of every open order in one call (sapi-crm ?ids=, a single SOQL query)">
+		<http:request method="GET" config-ref="sapi-crm-http-config" path="/contacts" responseTimeout="${rs.crm.timeoutMillis}"
+			doc:name="http-request-ex-contacts" doc:description="Contacts by ids">
+			<http:headers>#[output application/java --- { 'x-correlation-id': correlationId }]</http:headers>
+			<http:query-params>#[output application/java --- { ids: (vars.openOrders.customerId distinctBy $) joinBy ',' }]</http:query-params>
+		</http:request>
+		<set-payload value="#[output application/java --- payload]" doc:name="set-payload-contacts" doc:description="Reads the contacts inside the resilient call"/>
+	</sub-flow>
+
+	<sub-flow name="ex-logistics-read-subflow" doc:name="ex-logistics-read-subflow"
+		doc:description="Dispatch notes of the pending, signed and rejected folders (one call per folder): which open orders were dispatched or rejected">
+		<set-variable variableName="dnListings" value="#[output application/java --- []]" doc:name="set-dn-listings" doc:description="Listings so far"/>
+		<foreach collection="#[output application/java --- ['PENDING', 'SIGNED', 'REJECTED']]" doc:name="foreach-dispatch-status" doc:description="One listing per folder">
+			<set-variable variableName="dnStatus" value="#[output application/java --- payload]" doc:name="set-dn-status" doc:description="Folder being listed"/>
+			<http:request method="GET" config-ref="sapi-sftp-orders-http-config" path="/dispatch-notes" responseTimeout="${rs.logistics.timeoutMillis}"
+				doc:name="http-request-ex-dispatch-notes" doc:description="Dispatch notes of one folder">
+				<http:headers>#[output application/java --- { 'x-correlation-id': correlationId }]</http:headers>
+				<http:query-params>#[output application/java --- { status: vars.dnStatus }]</http:query-params>
+			</http:request>
+			<set-variable variableName="dnListings" value="#[output application/java --- vars.dnListings ++ [payload]]" doc:name="set-dn-listings-add" doc:description="Adds the folder listing"/>
+		</foreach>
+		<set-payload value="#[output application/java --- vars.dnListings]" doc:name="set-payload-dn-listings" doc:description="The three listings"/>
+	</sub-flow>
+
+</mule>

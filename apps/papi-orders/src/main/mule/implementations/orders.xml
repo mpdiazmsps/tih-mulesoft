@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+		http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+	<!-- Catalog, order listing and order registration. The order is registered as RECEIVED; the confirmation cycle
+	     (cycle.xml) prices and confirms it later. -->
+
+	<!-- ======================================================================= GET /products -->
+	<flow name="products-get-flow" doc:name="products-get-flow"
+		doc:description="A catalog page: local price or the last price of the preferred provider. Never quotes live">
+		<http:request method="GET" config-ref="sapi-oracle-core-http-config" path="/inventory/items"
+			doc:name="http-request-inventory-page" doc:description="One inventory page (without providers)">
+			<http:headers>#[output application/java --- { 'x-correlation-id': correlationId }]</http:headers>
+			<http:query-params>#[output application/java --- { page: attributes.queryParams.page default 1, size: attributes.queryParams.size default 20 }]</http:query-params>
+		</http:request>
+		<choice doc:name="choice-empty-page" doc:description="An empty page needs no second call">
+			<when expression="#[isEmpty(payload)]" doc:name="when-empty-page" doc:description="No products in the page">
+				<set-payload value="#[output application/json --- []]" doc:name="set-payload-empty-catalog" doc:description="Empty catalog page"/>
+			</when>
+			<otherwise doc:name="otherwise-products" doc:description="Batch call with the providers of the page items">
+				<http:request method="GET" config-ref="sapi-oracle-core-http-config" path="/inventory/items"
+					doc:name="http-request-inventory-batch" doc:description="The same items with their providers and last prices (one call)">
+					<http:headers>#[output application/java --- { 'x-correlation-id': correlationId }]</http:headers>
+					<http:query-params>#[output application/java --- { ids: payload.itemId joinBy ',' }]</http:query-params>
+				</http:request>
+				<ee:transform doc:name="transform-catalog" doc:description="Products with their catalog price, sorted by SKU">
+					<ee:message>
+						<ee:set-payload><![CDATA[%dw 2.0
+import toProduct from modules::orders
+output application/json
+---
+(payload map toProduct($)) orderBy ((p) -> p.sku)]]></ee:set-payload>
+					</ee:message>
+				</ee:transform>
+			</otherwise>
+		</choice>
+	</flow>
+
+	<!-- ========================================================================= GET /orders -->
+	<flow name="orders-list-flow" doc:name="orders-list-flow" doc:description="Orders by status and from a date: the query goes to sapi-oracle-core">
+		<http:request method="GET" config-ref="sapi-oracle-core-http-config" path="/orders"
+			doc:name="http-request-orders-list" doc:description="Lists the ERP orders with the same filters">
+			<http:headers>#[output application/java --- { 'x-correlation-id': correlationId }]</http:headers>
+			<http:query-params>#[output application/java --- do { var q = attributes.queryParams default {} --- {
+				(status: q.status) if (q.status != null), (from: q.from) if (q.from != null),
+				(page: q.page) if (q.page != null), (size: q.size) if (q.size != null) } }]</http:query-params>
+		</http:request>
+	</flow>
+
+	<!-- ======================================================================== POST /orders -->
+	<flow name="orders-register-flow" doc:name="orders-register-flow"
+		doc:description="Validates the customer and registers the order as RECEIVED in less than 1 s; the cycle confirms it later">
+		<set-variable variableName="newOrder" value="#[output application/java --- payload]"
+			doc:name="set-new-order" doc:description="Keeps the request: each HTTP call replaces the payload"/>
+		<set-variable variableName="orderId" value="#[output application/java --- uuid()]"
+			doc:name="set-order-id" doc:description="papi-orders generates the order id"/>
+		<logger level="INFO" message="#[output application/java --- 'INIT - Register order, orderId: ' ++ vars.orderId ++ ' customerId: ' ++ vars.newOrder.customerId ++ ' correlationId: ' ++ correlationId]"
+			doc:name="logger-register-order-start" doc:description="Logs the start of the registration"/>
+		<http:request method="GET" config-ref="papi-customers-http-config" path="#[output application/java --- '/customers/' ++ vars.newOrder.customerId]"
+			doc:name="http-request-validate-customer" doc:description="The customer must exist (papi-customers, Salesforce)">
+			<http:headers>#[output application/java --- { 'x-correlation-id': correlationId }]</http:headers>
+			<http:response-validator>
+				<http:success-status-code-validator values="200,404"/>
+			</http:response-validator>
+		</http:request>
+		<choice doc:name="choice-customer-exists" doc:description="An unknown customer is a validation error">
+			<when expression="#[attributes.statusCode == 404]" doc:name="when-customer-unknown" doc:description="papi-customers answered 404">
+				<raise-error type="APP:VALIDATION_ERROR" description="The customer does not exist"
+					doc:name="raise-customer-unknown" doc:description="Returns 400"/>
+			</when>
+		</choice>
+		<http:request method="POST" config-ref="sapi-oracle-core-http-config" path="/orders"
+			doc:name="http-request-create-order" doc:description="Registers header and lines in the ERP; the order is born RECEIVED">
+			<http:body><![CDATA[#[output application/json --- { orderId: vars.orderId, customerId: vars.newOrder.customerId, currency: p('currency'), lines: vars.newOrder.lines }]]]></http:body>
+			<http:headers>#[output application/java --- { 'x-correlation-id': correlationId }]</http:headers>
+			<http:response-validator>
+				<http:success-status-code-validator values="200..299,400"/>
+			</http:response-validator>
+		</http:request>
+		<choice doc:name="choice-order-accepted" doc:description="The ERP rejects unknown or repeated items with 400">
+			<when expression="#[attributes.statusCode == 400]" doc:name="when-order-rejected" doc:description="Invalid lines">
+				<raise-error type="APP:VALIDATION_ERROR" description="#[output application/java --- payload.message default 'The order lines are not valid']"
+					doc:name="raise-order-rejected" doc:description="Returns 400 with the ERP message"/>
+			</when>
+		</choice>
+		<ee:transform doc:name="transform-order-receipt" doc:description="orderId, RECEIVED and creation date">
+			<ee:message>
+				<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{ orderId: payload.orderId default vars.orderId, status: payload.status default "RECEIVED", createdAt: payload.createdAt }]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<set-variable variableName="httpStatus" value="#[201]" doc:name="set-http-status-201" doc:description="Order registered"/>
+		<logger level="INFO" message="#[output application/java --- 'END - Register order, orderId: ' ++ vars.orderId ++ ' correlationId: ' ++ correlationId]"
+			doc:name="logger-register-order-end" doc:description="Logs the end of the registration"/>
+	</flow>
+
+</mule>

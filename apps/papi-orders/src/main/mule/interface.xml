@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:apikit="http://www.mulesoft.org/schema/mule/mule-apikit"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+		http://www.mulesoft.org/schema/mule/mule-apikit http://www.mulesoft.org/schema/mule/mule-apikit/current/mule-apikit.xsd">
+
+	<apikit:config name="papi-orders-config"
+		api="resource::9885f017-0660-4c80-a27f-eb006d124bd8:papi-orders:1.0.0:raml:zip:papi-orders.raml"
+		outboundHeadersMapName="outboundHeaders"
+		httpStatusVarName="httpStatus"
+		doc:name="APIkit Router config"
+		doc:description="Validates each request against the papi-orders RAML and routes it to its interface flow"/>
+
+	<flow name="papi-orders-main"
+		doc:name="papi-orders-main"
+		doc:description="HTTP entry point. Errors are handled by the global error handler">
+		<http:listener config-ref="papi-orders-httpListenerConfig" path="${http.listener.basePath}/*"
+			doc:name="Listener"
+			doc:description="Receives requests on the API base path">
+			<http:response statusCode="#[vars.httpStatus default 200]">
+				<http:headers>#[vars.outboundHeaders default {}]</http:headers>
+			</http:response>
+			<http:error-response statusCode="#[vars.httpStatus default 500]">
+				<http:body>#[payload]</http:body>
+				<http:headers>#[vars.outboundHeaders default {}]</http:headers>
+			</http:error-response>
+		</http:listener>
+		<apikit:router config-ref="papi-orders-config"
+			doc:name="APIkit Router"
+			doc:description="Routes the request to the interface flow matching the RAML method and resource"/>
+	</flow>
+
+	<!-- Interface flows with the APIkit scaffolding names: they only delegate to the implementation. Do not rename. -->
+
+	<flow name="get:\products:papi-orders-config" doc:name="get:\products" doc:description="Catalog">
+		<flow-ref name="products-get-flow" doc:name="products-get-flow" doc:description="Delegates to the catalog"/>
+	</flow>
+
+	<flow name="get:\orders:papi-orders-config" doc:name="get:\orders" doc:description="List orders">
+		<flow-ref name="orders-list-flow" doc:name="orders-list-flow" doc:description="Delegates to the order listing"/>
+	</flow>
+
+	<flow name="post:\orders:application\json:papi-orders-config" doc:name="post:\orders" doc:description="Register order">
+		<flow-ref name="orders-register-flow" doc:name="orders-register-flow" doc:description="Delegates to the order registration"/>
+	</flow>
+
+	<flow name="post:\orders\process:papi-orders-config" doc:name="post:\orders\process" doc:description="Run the confirmation cycle">
+		<flow-ref name="cycle-trigger-flow" doc:name="cycle-trigger-flow" doc:description="Delegates to the cycle trigger"/>
+	</flow>
+
+	<flow name="get:\orders\exceptions:papi-orders-config" doc:name="get:\orders\exceptions" doc:description="Orders at risk">
+		<flow-ref name="exceptions-get-flow" doc:name="exceptions-get-flow" doc:description="Delegates to the exceptions inbox"/>
+	</flow>
+
+	<flow name="get:\orders\(orderId):papi-orders-config" doc:name="get:\orders\(orderId)" doc:description="Order 360">
+		<flow-ref name="order360-get-flow" doc:name="order360-get-flow" doc:description="Delegates to the Order 360"/>
+	</flow>
+
+	<flow name="get:\orders\(orderId)\alternatives:papi-orders-config" doc:name="get:\orders\(orderId)\alternatives" doc:description="Quoted alternatives">
+		<flow-ref name="alternatives-get-flow" doc:name="alternatives-get-flow" doc:description="Delegates to the alternatives"/>
+	</flow>
+
+	<flow name="post:\orders\(orderId)\corrections:application\json:papi-orders-config" doc:name="post:\orders\(orderId)\corrections" doc:description="Apply approved correction">
+		<flow-ref name="corrections-post-flow" doc:name="corrections-post-flow" doc:description="Delegates to the correction"/>
+	</flow>
+
+</mule>

@@ -1,0 +1,161 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+		http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+	<!-- Approved corrections, called by papi-order-requests with the key of the request.
+	     - RESTOCK: restock with reference = key, one outbound per line with reference = key-out-itemId, and the dispatch
+	       note when the order has none yet. The ERP registers each reference once (D7): repeating the key moves nothing.
+	     - REISSUE: a new dispatch note only while the latest one is REJECTED; afterwards the reissue is already applied.
+	     Neither publishes order.registered (D18): the customer email comes from correction.applied. -->
+
+	<flow name="corrections-post-flow" doc:name="corrections-post-flow"
+		doc:description="Applies an approved RESTOCK or REISSUE once per key; 201 when applied now, 200 when the key was already applied">
+		<set-variable variableName="orderId" value="#[output application/java --- attributes.uriParams.orderId]" doc:name="set-order-id" doc:description="Order id from the path"/>
+		<set-variable variableName="correction" value="#[output application/java --- payload]" doc:name="set-correction" doc:description="The approved correction"/>
+		<logger level="INFO" message="#[output application/java --- 'INIT - Correction ' ++ vars.correction.'type' ++ ', orderId: ' ++ vars.orderId ++ ' key: ' ++ vars.correction.key ++ ' correlationId: ' ++ correlationId]"
+			doc:name="logger-correction-start" doc:description="Logs the start of the correction"/>
+		<choice doc:name="choice-restock-fields" doc:description="RESTOCK needs the item, the provider and the quantity">
+			<when expression="#[vars.correction.'type' == 'RESTOCK' and (vars.correction.itemId == null or vars.correction.provider == null or vars.correction.quantity == null)]"
+				doc:name="when-restock-incomplete" doc:description="Missing fields">
+				<raise-error type="APP:VALIDATION_ERROR" description="RESTOCK needs itemId, provider and quantity"
+					doc:name="raise-restock-incomplete" doc:description="Returns 400"/>
+			</when>
+		</choice>
+		<http:request method="GET" config-ref="sapi-oracle-core-http-config" path="#[output application/java --- '/orders/' ++ vars.orderId]"
+			doc:name="http-request-corr-order" doc:description="The order to correct (404 when it does not exist)">
+			<http:headers>#[output application/java --- { 'x-correlation-id': correlationId }]</http:headers>
+			<http:response-validator>
+				<http:success-status-code-validator values="200,404"/>
+			</http:response-validator>
+		</http:request>
+		<choice doc:name="choice-corr-order-exists" doc:description="404 when the order does not exist">
+			<when expression="#[attributes.statusCode == 404]" doc:name="when-corr-order-not-found" doc:description="The order is not in the ERP">
+				<raise-error type="APP:ORDER_NOT_FOUND" description="The order does not exist" doc:name="raise-corr-order-not-found" doc:description="Returns 404"/>
+			</when>
+		</choice>
+		<set-variable variableName="order" value="#[output application/java --- payload]" doc:name="set-order" doc:description="ERP order"/>
+		<http:request method="GET" config-ref="sapi-sftp-orders-http-config" path="#[output application/java --- '/dispatch-notes/' ++ vars.orderId]"
+			doc:name="http-request-corr-latest-dispatch" doc:description="The latest dispatch note of the order, if any">
+			<http:headers>#[output application/java --- { 'x-correlation-id': correlationId }]</http:headers>
+			<http:response-validator>
+				<http:success-status-code-validator values="200,404"/>
+			</http:response-validator>
+		</http:request>
+		<set-variable variableName="latestNote" value="#[output application/java --- if (attributes.statusCode == 404) null else payload]"
+			doc:name="set-latest-note" doc:description="Latest dispatch note, or null"/>
+		<choice doc:name="choice-correction-type" doc:description="RESTOCK or REISSUE">
+			<when expression="#[vars.correction.'type' == 'RESTOCK']" doc:name="when-restock" doc:description="Restock and dispatch">
+				<flow-ref name="corrections-restock-subflow" doc:name="flow-ref-corrections-restock" doc:description="Movements and dispatch note"/>
+			</when>
+			<otherwise doc:name="otherwise-reissue" doc:description="Reissue the rejected dispatch note">
+				<flow-ref name="corrections-reissue-subflow" doc:name="flow-ref-corrections-reissue" doc:description="New dispatch note with the next sequence"/>
+			</otherwise>
+		</choice>
+		<ee:transform doc:name="transform-correction-result" doc:description="What the correction did">
+			<ee:message>
+				<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+	orderId: vars.orderId,
+	"type": vars.correction."type",
+	key: vars.correction.key,
+	(restock: vars.restockMovement) if (vars.restockMovement != null),
+	(outbound: vars.outboundMovements) if (vars.outboundMovements != null),
+	dispatchNote: vars.dispatchNote
+}]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<set-variable variableName="httpStatus" value="#[output application/java --- if (vars.appliedNow default false) 201 else 200]"
+			doc:name="set-http-status" doc:description="201 when applied now, 200 when the key was already applied"/>
+		<logger level="INFO" message="#[output application/java --- 'END - Correction ' ++ vars.correction.'type' ++ ', orderId: ' ++ vars.orderId ++ ' appliedNow: ' ++ (vars.appliedNow default false) ++ ' correlationId: ' ++ correlationId]"
+			doc:name="logger-correction-end" doc:description="Logs the end of the correction (no order.registered, D18)"/>
+	</flow>
+
+	<!-- ===================================================================== RESTOCK -->
+	<sub-flow name="corrections-restock-subflow" doc:name="corrections-restock-subflow"
+		doc:description="Restock (reference = key), outbound per line (reference = key-out-itemId) and the dispatch note if the order has none">
+		<http:request method="POST" config-ref="sapi-oracle-core-http-config" path="/inventory/movements"
+			doc:name="http-request-corr-restock" doc:description="Restock: 201 the first time, 200 with the original when the key repeats (D7)">
+			<http:body><![CDATA[#[output application/json --- { itemId: vars.correction.itemId, 'type': 'RESTOCK', quantity: vars.correction.quantity, reference: vars.correction.key, orderId: vars.orderId }]]]></http:body>
+			<http:headers>#[output application/java --- { 'x-correlation-id': correlationId }]</http:headers>
+			<http:response-validator>
+				<http:success-status-code-validator values="200..299,404"/>
+			</http:response-validator>
+		</http:request>
+		<choice doc:name="choice-restock-item" doc:description="The item must exist">
+			<when expression="#[attributes.statusCode == 404]" doc:name="when-restock-item-unknown" doc:description="Unknown item">
+				<raise-error type="APP:VALIDATION_ERROR" description="The item to restock does not exist" doc:name="raise-restock-item-unknown" doc:description="Returns 400"/>
+			</when>
+		</choice>
+		<set-variable variableName="appliedNow" value="#[output application/java --- attributes.statusCode == 201]" doc:name="set-applied-now" doc:description="201 means this key is applied now"/>
+		<set-variable variableName="restockMovement" value="#[output application/java --- payload]" doc:name="set-restock-movement" doc:description="The restock movement"/>
+		<set-variable variableName="outboundMovements" value="#[output application/java --- []]" doc:name="set-outbound-movements" doc:description="Outbound movements so far"/>
+		<foreach collection="#[vars.order.lines]" doc:name="foreach-corr-outbound" doc:description="One outbound per order line">
+			<http:request method="POST" config-ref="sapi-oracle-core-http-config" path="/inventory/movements"
+				doc:name="http-request-corr-outbound" doc:description="Outbound of the line; registered once per key (D7)">
+				<http:body><![CDATA[#[output application/json --- { itemId: payload.itemId, 'type': 'OUTBOUND', quantity: payload.quantity, reference: vars.correction.key ++ '-out-' ++ payload.itemId, orderId: vars.orderId }]]]></http:body>
+				<http:headers>#[output application/java --- { 'x-correlation-id': correlationId }]</http:headers>
+				<http:response-validator>
+					<http:success-status-code-validator values="200..299,409"/>
+				</http:response-validator>
+			</http:request>
+			<choice doc:name="choice-outbound-stock" doc:description="Even after the restock the stock may not be enough">
+				<when expression="#[attributes.statusCode == 409]" doc:name="when-outbound-insufficient" doc:description="Not enough stock">
+					<raise-error type="APP:INSUFFICIENT_STOCK" description="#[output application/java --- 'The stock is still not enough for item ' ++ vars.order.lines[vars.counter - 1].itemId]"
+						doc:name="raise-outbound-insufficient" doc:description="Returns 409; the restock stays registered"/>
+				</when>
+			</choice>
+			<set-variable variableName="outboundMovements" value="#[output application/java --- vars.outboundMovements ++ [payload]]" doc:name="set-outbound-add" doc:description="Keeps the outbound movement"/>
+		</foreach>
+		<choice doc:name="choice-restock-dispatch" doc:description="The dispatch note is dropped once: an existing one is reused">
+			<when expression="#[vars.latestNote == null]" doc:name="when-no-dispatch-yet" doc:description="The order has no dispatch note">
+				<flow-ref name="corrections-drop-dispatch-subflow" doc:name="flow-ref-drop-dispatch" doc:description="Drops the dispatch note"/>
+			</when>
+			<otherwise doc:name="otherwise-dispatch-exists" doc:description="Already dispatched (the key was applied before)">
+				<set-variable variableName="dispatchNote" value="#[output application/java --- vars.latestNote]" doc:name="set-dispatch-note-existing" doc:description="Existing dispatch note"/>
+			</otherwise>
+		</choice>
+	</sub-flow>
+
+	<!-- ===================================================================== REISSUE -->
+	<sub-flow name="corrections-reissue-subflow" doc:name="corrections-reissue-subflow"
+		doc:description="New dispatch note only while the latest one is REJECTED; otherwise the reissue is already applied">
+		<choice doc:name="choice-latest-rejected" doc:description="Only a rejected dispatch note is reissued">
+			<when expression="#[vars.latestNote != null and vars.latestNote.status == 'REJECTED']" doc:name="when-latest-rejected" doc:description="Reissue now">
+				<set-variable variableName="appliedNow" value="#[output application/java --- true]" doc:name="set-applied-now-reissue" doc:description="Applied now"/>
+				<flow-ref name="corrections-drop-dispatch-subflow" doc:name="flow-ref-drop-dispatch" doc:description="Drops the dispatch note with the next sequence"/>
+			</when>
+			<when expression="#[vars.latestNote != null and (vars.latestNote.sequence default 1) &gt; 1]" doc:name="when-already-reissued" doc:description="A newer dispatch note exists">
+				<set-variable variableName="appliedNow" value="#[output application/java --- false]" doc:name="set-applied-before" doc:description="Already applied"/>
+				<set-variable variableName="dispatchNote" value="#[output application/java --- vars.latestNote]" doc:name="set-dispatch-note-reissued" doc:description="The reissued dispatch note"/>
+			</when>
+			<otherwise doc:name="otherwise-nothing-to-reissue" doc:description="No rejected dispatch note">
+				<raise-error type="APP:INVALID_TRANSITION" description="The order has no rejected dispatch note to reissue"
+					doc:name="raise-nothing-to-reissue" doc:description="Returns 409"/>
+			</otherwise>
+		</choice>
+	</sub-flow>
+
+	<!-- ===================================================================== Dispatch note -->
+	<sub-flow name="corrections-drop-dispatch-subflow" doc:name="corrections-drop-dispatch-subflow" doc:description="Drops the order dispatch note (sapi-sftp-orders assigns the next sequence)">
+		<http:request method="GET" config-ref="papi-customers-http-config" path="#[output application/java --- '/customers/' ++ vars.order.customerId]"
+			doc:name="http-request-corr-customer" doc:description="Name and delivery address for the dispatch note">
+			<http:headers>#[output application/java --- { 'x-correlation-id': correlationId }]</http:headers>
+		</http:request>
+		<http:request method="POST" config-ref="sapi-sftp-orders-http-config" path="/dispatch-notes"
+			doc:name="http-request-corr-dispatch" doc:description="Drops the dispatch note into the logistics pending folder">
+			<http:body><![CDATA[#[output application/json --- { orderId: vars.orderId, customer: { name: payload.name, address: payload.address }, lines: vars.order.lines map ((l) -> { sku: l.sku, quantity: l.quantity }) }]]]></http:body>
+			<http:headers>#[output application/java --- { 'x-correlation-id': correlationId }]</http:headers>
+		</http:request>
+		<set-variable variableName="dispatchNote" value="#[output application/java --- payload]" doc:name="set-dispatch-note-new" doc:description="The new dispatch note"/>
+	</sub-flow>
+
+</mule>

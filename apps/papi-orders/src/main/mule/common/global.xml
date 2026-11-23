@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:os="http://www.mulesoft.org/schema/mule/os"
+	xmlns:amqp="http://www.mulesoft.org/schema/mule/amqp"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns:secure-properties="http://www.mulesoft.org/schema/mule/secure-properties"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/os http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd
+		http://www.mulesoft.org/schema/mule/amqp http://www.mulesoft.org/schema/mule/amqp/current/mule-amqp.xsd
+		http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+		http://www.mulesoft.org/schema/mule/secure-properties http://www.mulesoft.org/schema/mule/secure-properties/current/mule-secure-properties.xsd">
+
+	<!-- Shared resilience configuration (task 10): every Order 360 and exceptions branch goes through resilience-call. -->
+	<import file="poc-resilience.xml"/>
+
+	<global-property name="env" value="local"
+		doc:name="Global Property"
+		doc:description="Active environment: local by default; CloudHub passes env=cloud"/>
+
+	<configuration-properties file="properties/${env}-application-config.yaml"
+		doc:name="Configuration properties"
+		doc:description="Environment properties: listener, the APIs it calls, confirmation cycle and RabbitMQ"/>
+
+	<secure-properties:config name="Secure_Properties_Config" file="properties/${env}-secure-application-config.yaml" key="${encryption.key}"
+		doc:name="Secure Properties Config"
+		doc:description="RabbitMQ user and password encrypted with AES/CBC. The key is passed with -M-Dencryption.key">
+		<secure-properties:encrypt algorithm="AES" mode="CBC"/>
+	</secure-properties:config>
+
+	<configuration defaultErrorHandler-ref="global-error-handler"
+		doc:name="Configuration"
+		doc:description="Global error handler: turns any error into the contract ErrorResponse"/>
+
+	<http:listener-config name="papi-orders-httpListenerConfig"
+		doc:name="HTTP Listener config"
+		doc:description="API HTTP listener. Host and port come from the environment properties">
+		<http:listener-connection host="${http.listener.host}" port="${http.listener.port}"
+			doc:description="Opens the environment HTTP port; on CloudHub the load balancer terminates TLS"/>
+	</http:listener-config>
+
+	<http:request-config name="papi-customers-http-config" basePath="${papi.customers.basePath}" responseTimeout="${papi.customers.timeoutMillis}"
+		doc:name="papi-customers-http-config" doc:description="HTTP client for papi-customers (customer validation and dispatch address)">
+		<http:request-connection protocol="${papi.customers.protocol}" host="${papi.customers.host}" port="${papi.customers.port}"/>
+		<http:default-headers>
+			<http:default-header key="client_id" value="${clients.clientId}"/>
+			<http:default-header key="client_secret" value="${clients.clientSecret}"/>
+		</http:default-headers>
+	</http:request-config>
+
+	<http:request-config name="sapi-oracle-core-http-config" basePath="${sapi.oracleCore.basePath}" responseTimeout="${sapi.oracleCore.timeoutMillis}"
+		doc:name="sapi-oracle-core-http-config" doc:description="HTTP client for sapi-oracle-core (orders, inventory and movements)">
+		<http:request-connection protocol="${sapi.oracleCore.protocol}" host="${sapi.oracleCore.host}" port="${sapi.oracleCore.port}"/>
+		<http:default-headers>
+			<http:default-header key="client_id" value="${clients.clientId}"/>
+			<http:default-header key="client_secret" value="${clients.clientSecret}"/>
+		</http:default-headers>
+	</http:request-config>
+
+	<http:request-config name="sapi-crm-http-config" basePath="${sapi.crm.basePath}" responseTimeout="${sapi.crm.timeoutMillis}"
+		doc:name="sapi-crm-http-config" doc:description="HTTP client for sapi-crm (customer data of Order 360 and the exceptions inbox)">
+		<http:request-connection protocol="${sapi.crm.protocol}" host="${sapi.crm.host}" port="${sapi.crm.port}"/>
+		<http:default-headers>
+			<http:default-header key="client_id" value="${clients.clientId}"/>
+			<http:default-header key="client_secret" value="${clients.clientSecret}"/>
+		</http:default-headers>
+	</http:request-config>
+
+	<http:request-config name="sapi-sftp-orders-http-config" basePath="${sapi.sftpOrders.basePath}" responseTimeout="${sapi.sftpOrders.timeoutMillis}"
+		doc:name="sapi-sftp-orders-http-config" doc:description="HTTP client for sapi-sftp-orders (dispatch notes)">
+		<http:request-connection protocol="${sapi.sftpOrders.protocol}" host="${sapi.sftpOrders.host}" port="${sapi.sftpOrders.port}"/>
+		<http:default-headers>
+			<http:default-header key="client_id" value="${clients.clientId}"/>
+			<http:default-header key="client_secret" value="${clients.clientSecret}"/>
+		</http:default-headers>
+	</http:request-config>
+
+	<http:request-config name="sapi-price-providers-http-config" basePath="${sapi.priceProviders.basePath}" responseTimeout="${sapi.priceProviders.timeoutMillis}"
+		doc:name="sapi-price-providers-http-config" doc:description="HTTP client for sapi-price-providers (live quotes)">
+		<http:request-connection protocol="${sapi.priceProviders.protocol}" host="${sapi.priceProviders.host}" port="${sapi.priceProviders.port}"/>
+		<http:default-headers>
+			<http:default-header key="client_id" value="${clients.clientId}"/>
+			<http:default-header key="client_secret" value="${clients.clientSecret}"/>
+		</http:default-headers>
+	</http:request-config>
+
+	<amqp:config name="rabbitmq-amqp-config"
+		doc:name="rabbitmq-amqp-config" doc:description="RabbitMQ connection to publish order.registered">
+		<amqp:connection host="${rabbitmq.host}" port="${rabbitmq.port}" virtualHost="${rabbitmq.virtualHost}"
+			username="${secure::rabbitmq.user}" password="${secure::rabbitmq.password}">
+			<reconnection failsDeployment="false"/>
+		</amqp:connection>
+	</amqp:config>
+
+	<os:object-store name="cycle-lock-store" persistent="false" entryTtl="${cycle.lockTtlSeconds}" entryTtlUnit="SECONDS"
+		doc:name="cycle-lock-store"
+		doc:description="In-memory lock of the confirmation cycle; enough with 1 replica (D16). The entry expires in case a cycle dies"/>
+
+	<os:object-store name="quote-backoff-store" persistent="false" entryTtl="${cycle.quoteBackoffSeconds}" entryTtlUnit="SECONDS"
+		doc:name="quote-backoff-store"
+		doc:description="Products whose live quote failed recently (key provider-externalId): the cycle does not quote them again until the entry expires"/>
+
+	<!-- Global handler (enabled through defaultErrorHandler-ref). It only translates errors: no business logic. -->
+	<error-handler name="global-error-handler"
+		doc:name="Error Handler"
+		doc:description="Turns any error into the contract ErrorResponse with the matching HTTP status">
+		<on-error-propagate type="ANY" enableNotifications="true" logException="false"
+			doc:name="On Error Propagate"
+			doc:description="Handles APIkit, business (APP) and downstream (HTTP) errors">
+			<logger level="ERROR"
+				message="#['ERROR - ' ++ (error.errorType.namespace default 'MULE') ++ ':' ++ (error.errorType.identifier default 'ANY') ++ ' - ' ++ (error.description default '') ++ ' correlationId: ' ++ correlationId]"
+				doc:name="logger-global-error"
+				doc:description="Logs the error type, its description and the correlationId"/>
+			<ee:transform doc:name="transform-resolve-error-info"
+				doc:description="Resolves HTTP status, code, message and retryable flag from the error type">
+				<ee:message/>
+				<ee:variables>
+					<ee:set-variable variableName="errorInfo" resource="dataweave/mapping-error-info.dwl"/>
+				</ee:variables>
+			</ee:transform>
+			<ee:transform doc:name="transform-build-error-response"
+				doc:description="Builds the ErrorResponse, the HTTP status and the Retry-After header when the error is a 503">
+				<ee:message>
+					<ee:set-payload resource="dataweave/mapping-error-response.dwl"/>
+				</ee:message>
+				<ee:variables>
+					<ee:set-variable variableName="httpStatus"><![CDATA[%dw 2.0
+output application/java
+---
+vars.errorInfo.status]]></ee:set-variable>
+					<ee:set-variable variableName="outboundHeaders"><![CDATA[%dw 2.0
+output application/java
+---
+if (vars.errorInfo.status == 503) { "Retry-After": p('error.retryAfterSeconds') } else {}]]></ee:set-variable>
+				</ee:variables>
+			</ee:transform>
+		</on-error-propagate>
+	</error-handler>
+
+</mule>

@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+		http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+	<!-- Order 360 (P03 parallel fan-out, P06 partial response). The ERP is read first (order and inventory, local and
+	     fast); then the CRM, logistics and, with a shortage, the providers are queried in parallel. Each branch goes
+	     through resilience-call with a time limit below 3 s: a source that does not answer is flagged in "sources"
+	     and the response still arrives. -->
+
+	<!-- ================================================================= GET /orders/{orderId} -->
+	<flow name="order360-get-flow" doc:name="order360-get-flow" doc:description="The order seen from the ERP, the CRM, logistics and the providers">
+		<set-variable variableName="orderId" value="#[output application/java --- attributes.uriParams.orderId]" doc:name="set-order-id" doc:description="Order id from the path"/>
+		<flow-ref name="order360-build-subflow" doc:name="flow-ref-order360-build" doc:description="Builds vars.o360"/>
+		<set-payload value="#[output application/json --- vars.o360]" doc:name="set-payload-order360" doc:description="The Order 360"/>
+	</flow>
+
+	<!-- ======================================================== GET /orders/{orderId}/alternatives -->
+	<flow name="alternatives-get-flow" doc:name="alternatives-get-flow"
+		doc:description="RESTOCK with the quotes of every provider and the cheapest, or REISSUE for a rejected dispatch note">
+		<set-variable variableName="orderId" value="#[output application/java --- attributes.uriParams.orderId]" doc:name="set-order-id" doc:description="Order id from the path"/>
+		<flow-ref name="order360-build-subflow" doc:name="flow-ref-order360-build" doc:description="Builds vars.o360 with the quotes"/>
+		<set-variable variableName="alternatives" doc:name="set-alternatives" doc:description="Alternatives of the order exception, or null"
+			value="#[output application/java --- do { import alternativesResponse from modules::order360 --- alternativesResponse(vars.o360, vars.items, vars.quoteRs) }]"/>
+		<choice doc:name="choice-has-exception" doc:description="Without a shortage or a rejected dispatch note there is nothing to resolve">
+			<when expression="#[vars.alternatives == null]" doc:name="when-no-exception" doc:description="Nothing to resolve">
+				<raise-error type="APP:ORDER_WITHOUT_EXCEPTION" description="The order has no stock shortage or rejected dispatch note"
+					doc:name="raise-order-without-exception" doc:description="Returns 409"/>
+			</when>
+		</choice>
+		<set-payload value="#[output application/json --- vars.alternatives]" doc:name="set-payload-alternatives" doc:description="The alternatives"/>
+	</flow>
+
+	<!-- ================================================================= Building the Order 360 -->
+	<sub-flow name="order360-build-subflow" doc:name="order360-build-subflow"
+		doc:description="ERP first, then CRM, logistics and providers in parallel; leaves vars.o360, vars.items and vars.quoteRs">
+		<http:request method="GET" config-ref="sapi-oracle-core-http-config" path="#[output application/java --- '/orders/' ++ vars.orderId]"
+			doc:name="http-request-o360-order" doc:description="The ERP order (404 when it does not exist)">
+			<http:headers>#[output application/java --- { 'x-correlation-id': correlationId }]</http:headers>
+			<http:response-validator>
+				<http:success-status-code-validator values="200,404"/>
+			</http:response-validator>
+		</http:request>
+		<choice doc:name="choice-order-exists" doc:description="404 when the order does not exist">
+			<when expression="#[attributes.statusCode == 404]" doc:name="when-order-not-found" doc:description="The order is not in the ERP">
+				<raise-error type="APP:ORDER_NOT_FOUND" description="The order does not exist" doc:name="raise-order-not-found" doc:description="Returns 404"/>
+			</when>
+		</choice>
+		<set-variable variableName="order" value="#[output application/java --- payload]" doc:name="set-order" doc:description="ERP order"/>
+		<http:request method="GET" config-ref="sapi-oracle-core-http-config" path="/inventory/items"
+			doc:name="http-request-o360-items" doc:description="Stock and providers of the order items (one batch call)">
+			<http:headers>#[output application/java --- { 'x-correlation-id': correlationId }]</http:headers>
+			<http:query-params>#[output application/java --- { ids: vars.order.lines.itemId joinBy ',' }]</http:query-params>
+		</http:request>
+		<set-variable variableName="items" value="#[output application/java --- payload]" doc:name="set-items" doc:description="Inventory of the order items"/>
+		<ee:transform doc:name="transform-quote-request" doc:description="With a CONFIRMED order and a shortage, every provider of the short items is quoted">
+			<ee:message/>
+			<ee:variables>
+				<ee:set-variable variableName="quoteRequest"><![CDATA[%dw 2.0
+import lineViews, shortLines, quoteRequest from modules::order360
+output application/java
+var short = shortLines(lineViews(vars.order, vars.items))
+---
+if (vars.order.status == "CONFIRMED" and not isEmpty(short)) quoteRequest(short, vars.items) else []]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+		<scatter-gather doc:name="scatter-gather-sources" doc:description="CRM, logistics and providers in parallel; each branch never raises (resilience-call)">
+			<route>
+				<set-variable variableName="rsSource" value="crm" doc:name="set-rs-source-crm" doc:description="CRM source"/>
+				<set-variable variableName="rsFlow" value="o360-crm-read-subflow" doc:name="set-rs-flow-crm" doc:description="Reads the contact"/>
+				<flow-ref name="resilience-call" doc:name="flow-ref-resilience-crm" doc:description="Circuit breaker and one retry on connectivity"/>
+				<set-payload value="#[output application/java --- vars.rsResult]" doc:name="set-payload-crm-result" doc:description="Result of the CRM branch"/>
+			</route>
+			<route>
+				<set-variable variableName="rsSource" value="logistics" doc:name="set-rs-source-logistics" doc:description="Logistics source"/>
+				<set-variable variableName="rsFlow" value="o360-logistics-read-subflow" doc:name="set-rs-flow-logistics" doc:description="Reads the latest dispatch note"/>
+				<flow-ref name="resilience-call" doc:name="flow-ref-resilience-logistics" doc:description="Circuit breaker and one retry on connectivity"/>
+				<set-payload value="#[output application/java --- vars.rsResult]" doc:name="set-payload-logistics-result" doc:description="Result of the logistics branch"/>
+			</route>
+			<route>
+				<choice doc:name="choice-needs-quotes" doc:description="Providers are queried only with a shortage">
+					<when expression="#[not isEmpty(vars.quoteRequest)]" doc:name="when-needs-quotes" doc:description="Quote the missing quantity">
+						<set-variable variableName="rsSource" value="providers" doc:name="set-rs-source-providers" doc:description="Providers source"/>
+						<set-variable variableName="rsFlow" value="o360-quotes-read-subflow" doc:name="set-rs-flow-providers" doc:description="Quotes in parallel at sapi-price-providers"/>
+						<flow-ref name="resilience-call" doc:name="flow-ref-resilience-providers" doc:description="Circuit breaker and one retry on connectivity"/>
+						<set-payload value="#[output application/java --- vars.rsResult]" doc:name="set-payload-providers-result" doc:description="Result of the providers branch"/>
+					</when>
+					<otherwise doc:name="otherwise-no-quotes" doc:description="No shortage: nothing to quote">
+						<set-payload value="#[output application/java --- { ok: true, source: 'providers', payload: { quotes: [], noResponse: [] } }]"
+							doc:name="set-payload-no-quotes" doc:description="Empty quote result"/>
+					</otherwise>
+				</choice>
+			</route>
+		</scatter-gather>
+		<set-variable variableName="quoteRs" value="#[output application/java --- payload['2'].payload]" doc:name="set-quote-result" doc:description="Providers result"/>
+		<set-variable variableName="o360" doc:name="set-order360" doc:description="The composed Order 360"
+			value="#[output application/java --- do { import order360 from modules::order360 --- order360(vars.order, vars.items, payload['0'].payload, payload['1'].payload, payload['2'].payload, sizeOf(vars.quoteRequest)) }]"/>
+	</sub-flow>
+
+	<!-- ================================================================= Branch read flows (rsFlow) -->
+	<sub-flow name="o360-crm-read-subflow" doc:name="o360-crm-read-subflow" doc:description="The customer contact at sapi-crm">
+		<http:request method="GET" config-ref="sapi-crm-http-config" path="#[output application/java --- '/contacts/' ++ vars.order.customerId]"
+			responseTimeout="${rs.crm.timeoutMillis}"
+			doc:name="http-request-o360-contact" doc:description="Customer with its segment and city">
+			<http:headers>#[output application/java --- { 'x-correlation-id': correlationId }]</http:headers>
+		</http:request>
+		<set-payload value="#[output application/java --- payload]" doc:name="set-payload-contact" doc:description="Reads the contact inside the resilient call"/>
+	</sub-flow>
+
+	<sub-flow name="o360-logistics-read-subflow" doc:name="o360-logistics-read-subflow" doc:description="The latest dispatch note at sapi-sftp-orders; 404 means none yet">
+		<http:request method="GET" config-ref="sapi-sftp-orders-http-config" path="#[output application/java --- '/dispatch-notes/' ++ vars.order.orderId]"
+			responseTimeout="${rs.logistics.timeoutMillis}"
+			doc:name="http-request-o360-dispatch" doc:description="Latest dispatch note of the order">
+			<http:headers>#[output application/java --- { 'x-correlation-id': correlationId }]</http:headers>
+			<http:response-validator>
+				<http:success-status-code-validator values="200,404"/>
+			</http:response-validator>
+		</http:request>
+		<set-payload value="#[output application/java --- if (attributes.statusCode == 404) { found: false } else { found: true, note: payload }]"
+			doc:name="set-payload-dispatch" doc:description="Found with the note, or not found (ON_HOLD)"/>
+	</sub-flow>
+
+	<sub-flow name="o360-quotes-read-subflow" doc:name="o360-quotes-read-subflow" doc:description="Quotes of the short items at sapi-price-providers (always within its 3 s)">
+		<http:request method="POST" config-ref="sapi-price-providers-http-config" path="/quotes" responseTimeout="${rs.providers.timeoutMillis}"
+			doc:name="http-request-o360-quotes" doc:description="Parallel quote: quotes and providers without response">
+			<http:body><![CDATA[#[output application/json --- vars.quoteRequest]]]></http:body>
+			<http:headers>#[output application/java --- { 'x-correlation-id': correlationId }]</http:headers>
+		</http:request>
+		<set-payload value="#[output application/java --- payload]" doc:name="set-payload-quotes" doc:description="Reads the quotes inside the resilient call"/>
+	</sub-flow>
+
+</mule>
