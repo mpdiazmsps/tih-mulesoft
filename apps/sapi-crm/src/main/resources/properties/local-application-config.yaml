@@ -1,0 +1,26 @@
+# Configuration for the local environment (the default one). Credentials live in local-secure-application-config.yaml.
+http:
+  listener:
+    host: "0.0.0.0"
+    port: "8094"
+    basePath: "/api/v1/crm"
+
+salesforce:
+  # Keystore with the private key of the JWT (infra/salesforce/certs/poc-sf.p12, PKCS12, not versioned; the connector cannot read JKS). Its absolute path
+  # depends on where the repo is cloned: pass it when starting the app, -M-Dsalesforce.keyStore=<repo>/infra/salesforce/certs/poc-sf.p12
+  keyStore: ""
+  certificateAlias: "poc-sf"
+  # Developer Edition org: the JWT audience is login.salesforce.com
+  tokenEndpoint: "https://login.salesforce.com/services/oauth2/token"
+  audienceUrl: "https://login.salesforce.com"
+  # Ids per batch query (GET /contacts?ids=), as in the contract
+  maxIds: "50"
+
+# poc-resilience, source crm (failureThreshold 3 and openMillis 30000 by default). 3 s per Salesforce call.
+rs:
+  crm:
+    timeoutMillis: "3000"
+
+# Seconds suggested to the consumer in the Retry-After header when Salesforce is unavailable
+error:
+  retryAfterSeconds: "30"

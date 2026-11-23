@@ -1,0 +1,112 @@
+#%RAML 1.0
+title: sapi-crm
+version: v1
+baseUri: https://{host}/api/{version}/crm
+baseUriParameters:
+  host:
+    description: Public CloudHub 2.0 endpoint of the sapi-crm application.
+    type: string
+    example: sapi-crm-a1b2c3.usa-e1.cloudhub.io
+protocols: [HTTPS]
+mediaType: application/json
+description: |
+  The gateway to Salesforce. It uses the official connector with JWT authentication (connected app) and translates
+  the Contact into the common format: 18-character Id, segment (Segmento__c) and delivery address (MailingAddress).
+  - Several customers are fetched in a single query (`ids`, up to 50), never one by one, to protect the daily API limit.
+  - 3 s timeout and circuit breaker from the resilience library: with Salesforce down or out of quota it returns 503 retryable.
+
+uses:
+  common: ../fragments/poc-common/poc-common.raml
+
+/contacts:
+  get:
+    displayName: List or search contacts
+    description: |
+      Use one mode per call:
+      - `ids`: up to 50 contacts in one query. Unknown ids are left out.
+      - `email` or `phone`: search; the list may be empty.
+      - No filters: paged listing with `page` and `size`.
+      Combining modes returns 400.
+    is: [common.secured, common.validated, common.paged, common.bad-gateway, common.retryable]
+    queryParameters:
+      ids:
+        description: Comma-separated Salesforce Ids (up to 50).
+        type: string
+        required: false
+        pattern: '^[a-zA-Z0-9]{18}(,[a-zA-Z0-9]{18}){0,49}$'
+        example: 003Hs00000CUMBRAAA,003Hs00000TAPATAAA
+      email:
+        type: common.Email
+        required: false
+      phone:
+        type: common.Phone
+        required: false
+    responses:
+      200:
+        description: Contacts found.
+        body:
+          application/json:
+            type: common.Customer[]
+            example:
+              - id: 003Hs00000CUMBRAAA
+                name: Constructora Cumbres
+                email: compras@cumbres.ejemplo.mx
+                phone: '+528181234567'
+                segment: STRATEGIC
+                address:
+                  street: Av. Constitución 100
+                  city: Monterrey
+                  state: Nuevo León
+                  postalCode: '64000'
+              - id: 003Hs00000TAPATAAA
+                name: Grupo Hotelero Tapatío
+                email: compras@tapatio.ejemplo.mx
+                phone: '+523331234567'
+                segment: STRATEGIC
+                address:
+                  street: Av. Vallarta 2000
+                  city: Guadalajara
+                  state: Jalisco
+                  postalCode: '44100'
+  post:
+    displayName: Create contact
+    description: |
+      Creates the Contact in Salesforce. When no segment is sent, it is created as REGULAR.
+      An email that already exists is rejected by a Salesforce duplicate rule (exact email match, action Block),
+      even when two requests arrive at the same time; the API returns 409 CONTACT_ALREADY_EXISTS.
+    is: [common.secured, common.validated, common.conflict, common.bad-gateway, common.retryable]
+    body:
+      application/json:
+        type: common.CustomerRequest
+    responses:
+      201:
+        description: Contact created.
+        body:
+          application/json:
+            type: common.Customer
+      409:
+        description: A contact with the same email already exists. Nothing was created.
+        body:
+          application/json:
+            type: common.ErrorResponse
+            example:
+              code: CONTACT_ALREADY_EXISTS
+              message: A contact with this email already exists
+              correlationId: 0b6f2f0e-4a0c-4d25-9a4c-3d9e6a7b1c2d
+              timestamp: 2026-11-20T12:00:00-06:00
+              retryable: false
+
+  /{id}:
+    uriParameters:
+      id:
+        type: common.SalesforceId
+    get:
+      displayName: Get contact
+      description: A contact with its segment and delivery address.
+      is: [common.secured, common.not-found, common.bad-gateway, common.retryable]
+      responses:
+        200:
+          description: Contact found.
+          body:
+            application/json:
+              type: common.Customer

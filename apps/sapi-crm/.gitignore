@@ -1,0 +1,9 @@
+# Salida de build y de Studio
+target/
+.mule/
+.classpath
+.project
+.settings/
+
+# Local credentials: encrypted Salesforce values (consumer key, user, keystore password)
+src/main/resources/properties/*-secure-application-config.yaml

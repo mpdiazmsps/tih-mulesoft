@@ -1,0 +1,9 @@
+# Copy as local-secure-application-config.yaml (ignored by Git) and fill in with values encrypted as ![...]
+# with the POC_ENC_KEY key (AES/CBC, secure-mule-app skill).
+salesforce:
+  # Consumer Key of the "POC sapi-crm" external client app (infra/salesforce/README.md, section 3.2)
+  consumerKey: "![CHANGE_ME]"
+  # Salesforce user the JWT acts as (the org user with the POC Integracion permission set)
+  principal: "![CHANGE_ME]"
+  # Password of infra/salesforce/certs/poc-sf.jks
+  storePassword: "![CHANGE_ME]"
