@@ -1,0 +1,17 @@
+{
+  "packageDirectories": [
+    {
+      "path": "force-app",
+      "default": true
+    },
+    {
+      "path": "destructive/deactivate-1-duplicate"
+    },
+    {
+      "path": "destructive/deactivate-2-matching"
+    }
+  ],
+  "name": "poc-salesforce",
+  "namespace": "",
+  "sourceApiVersion": "62.0"
+}

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Email_Key__c</fullName>
+    <caseSensitive>false</caseSensitive>
+    <description>Correo en minúsculas, único. Lo llena sapi-crm al crear el contacto: Salesforce rechaza con DUPLICATE_VALUE una segunda inserción con el mismo correo aunque llegue al mismo tiempo (la regla de duplicados no ve inserciones simultáneas). D22.</description>
+    <externalId>true</externalId>
+    <label>Email Key</label>
+    <length>80</length>
+    <required>false</required>
+    <trackHistory>false</trackHistory>
+    <type>Text</type>
+    <unique>true</unique>
+</CustomField>

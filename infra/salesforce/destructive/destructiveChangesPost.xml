@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Retiro de los metadatos de la PoC. Antes se despliegan destructive/deactivate-1-duplicate y deactivate-2-matching (reglas inactivas, en ese orden). -->
+<Package xmlns="http://soap.sforce.com/2006/04/metadata">
+    <types>
+        <members>Contact.POC_Bloquear_Correo_Duplicado</members>
+        <name>DuplicateRule</name>
+    </types>
+    <types>
+        <members>Contact.POC_Email_Exacto</members>
+        <name>MatchingRule</name>
+    </types>
+    <types>
+        <members>Contact.Segmento__c</members>
+        <members>Contact.External_Id__c</members>
+        <members>Contact.Email_Key__c</members>
+        <name>CustomField</name>
+    </types>
+    <types>
+        <members>POC_Integracion</members>
+        <name>PermissionSet</name>
+    </types>
+    <version>62.0</version>
+</Package>

@@ -1,80 +1,99 @@
-#!/bin/bash
-# Levanta la infraestructura local de TIH en Docker: Oracle, RabbitMQ y (opcional) SFTP.
-# Crea los usuarios de RabbitMQ y espera a que todo esté listo. Se puede ejecutar varias veces.
-#
-# Uso:
-#   ./infra/scripts/start-infra.sh            # Oracle + RabbitMQ + SFTP en Docker
-#   ./infra/scripts/start-infra.sh --no-sftp  # sin SFTP en Docker
-set -u
-
+#!/usr/bin/env bash
+# Levanta las dependencias locales de la PoC (proyecto poc-infra) y deja todo listo. Se puede ejecutar varias veces.
+# Hace lo mismo que start-infra.ps1. Uso: ./infra/scripts/start-infra.sh [erp|integracion|logistica|proveedores|local]
+set -uo pipefail
+# En Git Bash (Windows) evita que las rutas del contenedor (/home/..., /opt/...) se conviertan en rutas de Windows.
+export MSYS_NO_PATHCONV=1   # por eso node se llama con rutas relativas desde el repo
+PROFILE=${1:-local}
 INFRA="$(cd "$(dirname "$0")/.." && pwd)"
-cd "$INFRA"
-NO_SFTP=false
-[ "${1:-}" = "--no-sftp" ] && NO_SFTP=true
+REPO="$(cd "$INFRA/.." && pwd)"
+cd "$REPO"   # rutas relativas desde el repo: funcionan igual en Linux, macOS y Git Bash
+COMPOSE=(docker compose -f infra/docker-compose.yml)
 
 fail() { echo "$1" >&2; exit 1; }
-
-env_value() { # env_value <archivo> <clave>
-  grep -E "^$2=" "$1" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '\r'
-}
-
-wait_healthy() { # wait_healthy <contenedor> <segundos>
-  printf "Esperando a %s (hasta %s min)..." "$1" "$(($2 / 60))"
-  local end=$((SECONDS + $2))
-  while [ $SECONDS -lt $end ]; do
-    if [ "$(docker inspect -f '{{.State.Health.Status}}' "$1" 2>/dev/null)" = "healthy" ]; then
-      echo " listo."; return 0
-    fi
-    printf "."; sleep 10
+env_get() { [ -f "$1" ] && grep -E "^$2=" "$1" | head -n1 | cut -d= -f2- | tr -d '\r'; }
+wait_healthy() {
+  echo -n "Esperando a $1 (hasta $(( $2 / 60 )) min)..."
+  local deadline=$(( $(date +%s) + $2 ))
+  while [ "$(date +%s)" -lt "$deadline" ]; do
+    [ "$(docker inspect -f '{{.State.Health.Status}}' "$1" 2>/dev/null)" = healthy ] && { echo " listo."; return; }
+    echo -n "."; sleep 5
   done
   echo; fail "$1 no quedó listo a tiempo. Revisa: docker logs $1"
 }
 
-# 1. Docker disponible
-docker info >/dev/null 2>&1 || fail "Docker no responde. Inicia Docker y vuelve a intentar."
+case "$PROFILE" in erp|integracion|logistica|proveedores|local) ;; *) fail "Perfil desconocido: $PROFILE";; esac
+uses() { case "$1:$PROFILE" in
+  oracle:erp|oracle:integracion|oracle:local|rabbitmq:integracion|rabbitmq:local|sftp:logistica|sftp:local|proveedores:proveedores|proveedores:local) return 0;;
+  *) return 1;; esac; }
 
-# 2. Archivos de credenciales: si falta alguno se crea desde su .example y se pide llenarlo
-required="oracle rabbitmq"
-$NO_SFTP || required="$required sftp"
-missing=""
-for name in $required; do
+# 1. Herramientas y credenciales
+docker info >/dev/null 2>&1 || fail "Docker no responde."
+command -v node >/dev/null || fail "Falta Node.js (se usa para generar las semillas)."
+missing=()
+for name in oracle rabbitmq; do
+  uses "$name" || continue
   f="$INFRA/$name/credentials.local"
-  if [ ! -f "$f" ]; then cp "$f.example" "$f"; missing="$missing\n  $f"; fi
+  [ -f "$f" ] || { cp "$f.example" "$f"; missing+=("$f"); }
 done
-if [ -n "$missing" ]; then
-  printf "Se crearon estos archivos desde sus plantillas. Cambia las claves y vuelve a ejecutar el script:%b\n" "$missing"
-  exit 1
+if [ ${#missing[@]} -gt 0 ]; then
+  echo "Se crearon estos archivos desde sus plantillas. Cambia las claves y vuelve a ejecutar el script:"
+  printf '  %s\n' "${missing[@]}"; exit 1
+fi
+if uses oracle; then
+  for k in ORACLE_PWD APP_USER APP_USER_PASSWORD INT_USER INT_USER_PASSWORD; do
+    [ -n "$(env_get "$INFRA/oracle/credentials.local" "$k")" ] || fail "Falta $k en infra/oracle/credentials.local."
+  done
 fi
 
-# 3. Contenedores
-if $NO_SFTP; then docker compose up -d; else docker compose --profile sftp up -d; fi \
-  || fail "docker compose falló. Si un puerto está ocupado, cámbialo en infra/.env (ver .env.example)."
-
-# 4. Usuarios de RabbitMQ
-wait_healthy tih-rabbitmq 180
-creds="$INFRA/rabbitmq/credentials.local"
-existing="$(docker exec tih-rabbitmq rabbitmqctl list_users --quiet --no-table-headers 2>/dev/null)"
-for kind in ADMIN APP; do
-  user="$(env_value "$creds" "RABBITMQ_${kind}_USER")"
-  pass="$(env_value "$creds" "RABBITMQ_${kind}_PASSWORD")"
-  [ -n "$user" ] && [ -n "$pass" ] || fail "Faltan usuarios o claves en rabbitmq/credentials.local."
-  if echo "$existing" | grep -q "^$user[[:space:]]"; then
-    docker exec tih-rabbitmq rabbitmqctl change_password "$user" "$pass" >/dev/null
-  else
-    docker exec tih-rabbitmq rabbitmqctl add_user "$user" "$pass" >/dev/null
-  fi || fail "No se pudo crear el usuario $user en RabbitMQ."
-  [ "$kind" = "ADMIN" ] && docker exec tih-rabbitmq rabbitmqctl set_user_tags "$user" administrator >/dev/null
-  docker exec tih-rabbitmq rabbitmqctl set_permissions -p / "$user" '.*' '.*' '.*' >/dev/null
-  echo "RabbitMQ: usuario $user listo."
+# 2. Contenedores de la base
+for c in tih-oracle tih-rabbitmq tih-sftp; do
+  docker ps --format '{{.Names}}' | grep -qx "$c" && echo "Aviso: $c (de la base) está corriendo. No se toca; consume memoria y puede ocupar puertos."
 done
 
-# 5. Oracle (el primer arranque crea la base, el esquema y el inventario de ejemplo)
-wait_healthy tih-oracle 900
+# 3. Semillas y llave del SFTP
+echo "Generando semillas desde data/scenario.json..."
+(cd "$REPO" && node data/tools/build-seeds.mjs) || fail "build-seeds.mjs falló."
+if uses sftp && [ ! -f "$INFRA/sftp/keys/poc_sftp_rsa" ]; then
+  echo "Generando la llave del SFTP (RSA 4096, PEM)..."
+  keys_host=$(cd "$INFRA/sftp/keys" && (pwd -W 2>/dev/null || pwd))   # ruta que entiende Docker también en Windows
+  docker run --rm --entrypoint sh -v "$keys_host:/k" atmoz/sftp:alpine \
+    -c 'ssh-keygen -q -t rsa -b 4096 -m PEM -N "" -C poc-sftp -f /k/poc_sftp_rsa && chmod 644 /k/poc_sftp_rsa.pub' \
+    || fail "No se pudo generar la llave del SFTP."
+fi
 
-port() { local v; v="$(env_value "$INFRA/.env" "$1")"; echo "${v:-$2}"; }
+# 4. Contenedores
+"${COMPOSE[@]}" --profile "$PROFILE" up -d || fail "docker compose falló. Si un puerto está ocupado, cámbialo en infra/.env."
+
+if uses rabbitmq; then
+  wait_healthy poc-rabbitmq 180
+  ok=0
+  for _ in $(seq 1 30); do
+    existing=$(docker exec poc-rabbitmq rabbitmqctl list_users --quiet --no-table-headers 2>/dev/null) && { ok=1; break; }
+    sleep 2
+  done
+  [ "$ok" = 1 ] || fail "RabbitMQ no acepta comandos. Revisa: docker logs poc-rabbitmq"
+  RC="$INFRA/rabbitmq/credentials.local"
+  for role in ADMIN APP; do
+    u=$(env_get "$RC" "RABBITMQ_${role}_USER"); pw=$(env_get "$RC" "RABBITMQ_${role}_PASSWORD")
+    [ -n "$u" ] && [ -n "$pw" ] || fail "Faltan usuarios o claves en infra/rabbitmq/credentials.local."
+    if echo "$existing" | grep -q "^$u[[:space:]]"; then
+      docker exec poc-rabbitmq rabbitmqctl change_password "$u" "$pw" >/dev/null
+    else
+      docker exec poc-rabbitmq rabbitmqctl add_user "$u" "$pw" >/dev/null
+    fi || fail "No se pudo crear el usuario $u en RabbitMQ."
+    [ "$role" = ADMIN ] && docker exec poc-rabbitmq rabbitmqctl set_user_tags "$u" administrator >/dev/null
+    docker exec poc-rabbitmq rabbitmqctl set_permissions -p / "$u" '.*' '.*' '.*' >/dev/null
+    echo "RabbitMQ: usuario $u listo."
+  done
+fi
+uses oracle && wait_healthy poc-oracle 900
+
+port() { v=$(env_get "$INFRA/.env" "$1"); echo "${v:-$2}"; }
 echo
-echo "Infraestructura lista:"
-echo "  Oracle    localhost:$(port ORACLE_PORT 1521)  servicio FREEPDB1"
-echo "  RabbitMQ  localhost:$(port RABBITMQ_PORT 5672)  consola http://localhost:$(port RABBITMQ_CONSOLE_PORT 15672)"
-$NO_SFTP || echo "  SFTP      localhost:$(port SFTP_PORT 2222)  usuario tihsftp, carpeta /orders"
-echo "Siguiente paso: README.md, sección 'Configurar las apps'."
+echo "Dependencias listas (perfil $PROFILE):"
+uses oracle && echo "  Oracle     localhost:$(port ORACLE_PORT 1523)  servicio FREEPDB1, esquemas STORE_APP e INTEGRATION_APP"
+uses rabbitmq && echo "  RabbitMQ   localhost:$(port RABBITMQ_PORT 5673)  consola http://localhost:$(port RABBITMQ_CONSOLE_PORT 15673)"
+uses sftp && echo "  SFTP       localhost:$(port SFTP_PORT 2223)  usuario pocsftp con llave infra/sftp/keys/poc_sftp_rsa, carpeta /despachos"
+uses proveedores && echo "  WireMock   http://localhost:$(port WIREMOCK_PORT 8089)  /proveedor-a, /proveedor-b, /proveedor-c"
+echo "Para dejar los datos del guion: ./infra/scripts/reset-data.sh"

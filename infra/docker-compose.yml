@@ -1,27 +1,34 @@
-# Infraestructura local del proyecto TIH.
+# Dependencias locales de la PoC «Integración en la era agéntica» (proyecto poc-infra).
 #
-# Arranque recomendado: scripts/start-infra.ps1 (Windows) o scripts/start-infra.sh (Linux/macOS).
-# Los puertos y el archivo de definiciones de RabbitMQ se pueden cambiar en infra/.env (ver .env.example).
+# Perfiles:
+#   erp          Oracle (esquemas STORE_APP e INTEGRATION_APP)
+#   integracion  Oracle y RabbitMQ
+#   logistica    SFTP y simulador de logística
+#   proveedores  WireMock con los proveedores A, B y C
+#   local        todo
 #
-# El contenedor Oracle preexistente `oracle-store` (y `ngrok-oracle`) NO forma parte de este compose
-# y no se modifica. La base del proyecto TIH es un contenedor nuevo e independiente: `tih-oracle`.
+# Arranque: infra/scripts/start-infra.ps1 o .sh (genera semillas y la llave SFTP, levanta y crea usuarios).
+# Reinicio de datos: infra/scripts/reset-data.ps1 o .sh. Control de la demo: demo/control.ps1 o .sh.
+#
+# Los contenedores llevan el prefijo poc-. No tocan `oracle-store`, `ngrok-oracle` ni los `tih-*` de la base.
+# Los puertos se cambian en infra/.env (ver .env.example).
 
-name: tih-infra
+name: poc-infra
 
 services:
-  oracle-tih:
+  poc-oracle:
+    profiles: ["erp", "integracion", "local"]
     image: container-registry.oracle.com/database/free:latest
-    container_name: tih-oracle
-    hostname: tih-oracle
+    container_name: poc-oracle
+    hostname: poc-oracle
     ports:
-      - "${ORACLE_PORT:-1521}:1521"       # listener
-      - "${ORACLE_EM_PORT:-5500}:5500"    # Enterprise Manager Express
+      - "${ORACLE_PORT:-1523}:1521"
     env_file:
-      - ./oracle/credentials.local   # ORACLE_PWD, APP_USER, APP_USER_PASSWORD
+      - ./oracle/credentials.local   # ORACLE_PWD, APP_USER, APP_USER_PASSWORD, INT_USER, INT_USER_PASSWORD
     volumes:
-      - tih-oracle-data:/opt/oracle/oradata
-      - ./oracle/init:/opt/oracle/scripts/startup:ro # se ejecuta en cada arranque; el script es idempotente
-      - ./oracle/sql:/opt/oracle/tih-sql:ro          # esquema y datos de ejemplo
+      - poc-oracle-data:/opt/oracle/oradata
+      - ./oracle/init:/opt/oracle/scripts/startup:ro   # crea los dos esquemas; idempotente
+      - ./oracle/sql:/opt/oracle/poc-sql:ro            # erp/, integration/ y verify/
     healthcheck:
       test: ["CMD", "/opt/oracle/checkDBStatus.sh"]
       interval: 20s
@@ -30,41 +37,76 @@ services:
       start_period: 120s
     restart: unless-stopped
 
-  rabbitmq:
-    image: rabbitmq:3.13-management
-    container_name: tih-rabbitmq
-    hostname: tih-rabbitmq
+  # Proveedores A (REST, estilo Fakestore), B (REST, estilo Escuelajs) y C (SOAP) simulados.
+  # Los mappings los genera data/tools/build-seeds.mjs desde data/scenario.json.
+  # El retardo del proveedor C se cambia por la API de administración (/__admin): demo/control slow-c | normal-c.
+  poc-wiremock:
+    profiles: ["proveedores", "local"]
+    image: wiremock/wiremock:3.9.1
+    container_name: poc-wiremock
+    hostname: poc-wiremock
+    command: ["--disable-banner"]
     ports:
-      - "${RABBITMQ_PORT:-5672}:5672"           # AMQP
-      - "${RABBITMQ_CONSOLE_PORT:-15672}:15672" # Consola web de administracion
+      - "${WIREMOCK_PORT:-8089}:8080"
     volumes:
-      - ./rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
-      # Exchanges, colas y DLQ. Los usuarios los crea scripts/start-infra con los datos de rabbitmq/credentials.local.
-      - ${RABBITMQ_DEFINITIONS_FILE:-./rabbitmq/definitions.json}:/etc/rabbitmq/definitions.json:ro
-    healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
-      interval: 10s
-      timeout: 10s
-      retries: 10
+      - ./wiremock/mappings:/home/wiremock/mappings:ro
+      - ./wiremock/__files:/home/wiremock/__files:ro
     restart: unless-stopped
 
-  # SFTP en Docker (alternativa a Rebex Tiny SFTP Server en Windows). Perfil opcional:
-  #   docker compose --profile sftp up -d
-  # El usuario es siempre `tihsftp`; su clave sale de SFTP_USERS en sftp/credentials.local.
-  sftp:
-    profiles: ["sftp"]
-    image: atmoz/sftp:alpine
-    container_name: tih-sftp
-    hostname: tih-sftp
+  # Mensajería de la integración: orders.events con order.registered, approval.requested y correction.applied (cada una con DLQ).
+  # start-infra crea los usuarios de rabbitmq/credentials.local.
+  poc-rabbitmq:
+    profiles: ["integracion", "local"]
+    image: rabbitmq:3.13-management
+    container_name: poc-rabbitmq
+    hostname: poc-rabbitmq
     ports:
-      - "${SFTP_PORT:-2222}:22"
-    env_file:
-      - ./sftp/credentials.local   # SFTP_USERS=tihsftp:<clave>:1001
+      - "${RABBITMQ_PORT:-5673}:5672"            # AMQP
+      - "${RABBITMQ_CONSOLE_PORT:-15673}:15672"  # consola web
     volumes:
-      - tih-sftp-data:/home/tihsftp/orders
-      - ./sftp/docker/create-order-dirs.sh:/etc/sftp.d/create-order-dirs.sh:ro # crea pending, processed y error
+      - ./rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+      - ./rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_running"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+    restart: unless-stopped
+
+  # SFTP de logística: usuario pocsftp solo con llave (sin contraseña, D21). Carpetas /despachos/pendientes, firmadas y rechazadas.
+  poc-sftp:
+    profiles: ["logistica", "local"]
+    image: atmoz/sftp:alpine
+    container_name: poc-sftp
+    hostname: poc-sftp
+    command: ["pocsftp::1001"]
+    ports:
+      - "${SFTP_PORT:-2223}:22"
+    volumes:
+      - poc-sftp-data:/home/pocsftp/despachos
+      - ./sftp/keys/poc_sftp_rsa.pub:/home/pocsftp/.ssh/keys/poc_sftp_rsa.pub:ro
+      - ./sftp/docker/create-dispatch-dirs.sh:/etc/sftp.d/create-dispatch-dirs.sh:ro
+    restart: unless-stopped
+
+  # Operador de logística simulado (D12): firma o rechaza lo que llega a pendientes y deja el acuse.
+  poc-logistics-sim:
+    profiles: ["logistica", "local"]
+    image: alpine:3.20
+    container_name: poc-logistics-sim
+    hostname: poc-logistics-sim
+    command: ["sh", "/sim/sim.sh"]
+    environment:
+      DESPACHOS: /despachos
+      RULES: /rules/logistics-rules.json
+      INTERVAL: "5"
+    volumes:
+      - poc-sftp-data:/despachos
+      - ../demo/logistics-sim:/sim:ro
+      - ../data:/rules:ro
+    depends_on:
+      - poc-sftp
     restart: unless-stopped
 
 volumes:
-  tih-oracle-data:
-  tih-sftp-data:
+  poc-oracle-data:
+  poc-sftp-data:

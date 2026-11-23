@@ -44,6 +44,56 @@
       "arguments": {
         "x-queue-type": "classic"
       }
+    },
+    {
+      "name": "approval.requested.q",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "classic",
+        "x-dead-letter-exchange": "orders.events.dlx",
+        "x-dead-letter-routing-key": "approval.requested.dead"
+      }
+    },
+    {
+      "name": "approval.requested.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "classic"
+      }
+    },
+    {
+      "name": "correction.applied.q",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "classic",
+        "x-dead-letter-exchange": "orders.events.dlx",
+        "x-dead-letter-routing-key": "correction.applied.dead"
+      }
+    },
+    {
+      "name": "correction.applied.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "classic"
+      }
+    },
+    {
+      "name": "demo.eventos.q",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "classic",
+        "x-max-length": 200
+      }
     }
   ],
   "bindings": [
@@ -61,6 +111,46 @@
       "destination": "orders.registered.dlq",
       "destination_type": "queue",
       "routing_key": "order.registered.dead",
+      "arguments": {}
+    },
+    {
+      "source": "orders.events",
+      "vhost": "/",
+      "destination": "approval.requested.q",
+      "destination_type": "queue",
+      "routing_key": "approval.requested",
+      "arguments": {}
+    },
+    {
+      "source": "orders.events.dlx",
+      "vhost": "/",
+      "destination": "approval.requested.dlq",
+      "destination_type": "queue",
+      "routing_key": "approval.requested.dead",
+      "arguments": {}
+    },
+    {
+      "source": "orders.events",
+      "vhost": "/",
+      "destination": "correction.applied.q",
+      "destination_type": "queue",
+      "routing_key": "correction.applied",
+      "arguments": {}
+    },
+    {
+      "source": "orders.events.dlx",
+      "vhost": "/",
+      "destination": "correction.applied.dlq",
+      "destination_type": "queue",
+      "routing_key": "correction.applied.dead",
+      "arguments": {}
+    },
+    {
+      "source": "orders.events",
+      "vhost": "/",
+      "destination": "demo.eventos.q",
+      "destination_type": "queue",
+      "routing_key": "#",
       "arguments": {}
     }
   ]

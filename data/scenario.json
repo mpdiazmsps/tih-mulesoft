@@ -1,0 +1,69 @@
+{
+  "_descripcion": "Datos del guion de la PoC (sección 6 de la final y D15). Única fuente: de aquí salen la semilla del ERP, las remisiones iniciales del SFTP, las reglas de logística, los simuladores de proveedores y los contactos de Salesforce. Los nombres PED-xxxx y SKU-xxx son solo etiquetas; los identificadores reales son los UUID.",
+  "moneda": "MXN",
+  "clientes": [
+    { "externalId": "POC-CUMBRES", "nombre": "Constructora Cumbres", "segmento": "ESTRATEGICO", "ciudad": "Monterrey", "estado": "Nuevo León", "calle": "Av. Constitución 100", "codigoPostal": "64000", "correo": "compras@cumbres.ejemplo.mx", "telefono": "+528181234567" },
+    { "externalId": "POC-TAPATIO", "nombre": "Grupo Hotelero Tapatío", "segmento": "ESTRATEGICO", "ciudad": "Guadalajara", "estado": "Jalisco", "calle": "Av. Vallarta 2000", "codigoPostal": "44100", "correo": "compras@tapatio.ejemplo.mx", "telefono": "+523331234567" },
+    { "externalId": "POC-ANGELOPOLIS", "nombre": "Ferretería Angelópolis", "segmento": "REGULAR", "ciudad": "Puebla", "estado": "Puebla", "calle": "Blvd. Atlixcáyotl 500", "codigoPostal": "72830", "correo": "compras@angelopolis.ejemplo.mx", "telefono": "+522221234567" },
+    { "externalId": "POC-COYOACAN", "nombre": "Papelería Coyoacán", "segmento": "REGULAR", "ciudad": "Ciudad de México", "estado": "Ciudad de México", "calle": "Av. Miguel Ángel de Quevedo 300", "codigoPostal": "04000", "correo": "compras@coyoacan.ejemplo.mx", "telefono": "+525551234567" }
+  ],
+  "productos": [
+    {
+      "clave": "SKU-100", "id": "20000000-0000-4000-8000-000000000100", "nombre": "Producto 100", "stock": 2, "precioLocal": 0,
+      "proveedores": [
+        { "abv": "FAK", "externalId": 7, "preferente": true, "ultimoPrecio": 189.00, "precio": 189.00, "responde": true },
+        { "abv": "ESC", "externalId": 122, "preferente": false, "ultimoPrecio": null, "precio": 194.00, "responde": true },
+        { "abv": "BOR", "externalId": 3, "preferente": false, "ultimoPrecio": null, "precio": 175.00, "responde": true }
+      ]
+    },
+    {
+      "clave": "SKU-200", "id": "20000000-0000-4000-8000-000000000200", "nombre": "Producto 200", "stock": 40, "precioLocal": 250.00,
+      "proveedores": [
+        { "abv": "FAK", "externalId": 8, "preferente": true, "ultimoPrecio": null, "precio": 231.00, "responde": true },
+        { "abv": "ESC", "externalId": 123, "preferente": false, "ultimoPrecio": null, "precio": 228.00, "responde": true },
+        { "abv": "BOR", "externalId": 4, "preferente": false, "ultimoPrecio": null, "precio": 236.00, "responde": true }
+      ]
+    },
+    {
+      "clave": "SKU-300", "id": "20000000-0000-4000-8000-000000000300", "nombre": "Producto 300", "stock": 15, "precioLocal": 0,
+      "proveedores": [
+        { "abv": "BOR", "externalId": 5, "preferente": true, "ultimoPrecio": null, "precio": null, "responde": false }
+      ]
+    }
+  ],
+  "pedidos": [
+    {
+      "clave": "PED-1001", "id": "10000000-0000-4000-8000-000000001001", "cliente": "POC-ANGELOPOLIS", "estado": "RECIBIDO", "creado": "2026-11-18T09:00:00-06:00",
+      "lineas": [ { "producto": "SKU-300", "cantidad": 2 } ],
+      "excepcionEsperada": "SIN_CONFIRMAR"
+    },
+    {
+      "clave": "PED-1002", "id": "10000000-0000-4000-8000-000000001002", "cliente": "POC-CUMBRES", "estado": "CONFIRMADO", "creado": "2026-11-18T10:30:00-06:00",
+      "lineas": [ { "producto": "SKU-100", "cantidad": 5, "precio": 189.00, "fuentePrecio": "ULTIMO_PRECIO", "proveedor": "FAK" } ],
+      "excepcionEsperada": "FALTANTE_INVENTARIO"
+    },
+    {
+      "clave": "PED-1003", "id": "10000000-0000-4000-8000-000000001003", "cliente": "POC-CUMBRES", "estado": "CONFIRMADO", "creado": "2026-11-18T12:00:00-06:00",
+      "lineas": [ { "producto": "SKU-200", "cantidad": 3, "precio": 250.00, "fuentePrecio": "LOCAL" } ],
+      "remision": { "n": 1, "estado": "FIRMADA", "depositada": "2026-11-18T12:05:00-06:00", "acuse": { "recibio": "Jorge Treviño", "fecha": "2026-11-19T10:15:00-06:00" } },
+      "excepcionEsperada": null
+    },
+    {
+      "clave": "PED-1004", "id": "10000000-0000-4000-8000-000000001004", "cliente": "POC-TAPATIO", "estado": "CONFIRMADO", "creado": "2026-11-18T15:45:00-06:00",
+      "lineas": [ { "producto": "SKU-200", "cantidad": 1, "precio": 250.00, "fuentePrecio": "LOCAL" } ],
+      "remision": { "n": 1, "estado": "RECHAZADA", "depositada": "2026-11-18T15:50:00-06:00", "acuse": { "motivo": "Dirección incorrecta", "fecha": "2026-11-19T09:30:00-06:00" } },
+      "excepcionEsperada": "REMISION_RECHAZADA"
+    },
+    {
+      "clave": "PED-1005", "id": "10000000-0000-4000-8000-000000001005", "cliente": "POC-COYOACAN", "estado": "CONFIRMADO", "creado": "2026-11-19T08:20:00-06:00",
+      "lineas": [ { "producto": "SKU-100", "cantidad": 4, "precio": 189.00, "fuentePrecio": "ULTIMO_PRECIO", "proveedor": "FAK" } ],
+      "excepcionEsperada": "FALTANTE_INVENTARIO"
+    }
+  ],
+  "logistica": {
+    "_descripcion": "El simulador rechaza solo estas remisiones (por nombre de archivo); el resto las firma. PED-1004 se rechazó en su remisión 1; al reemitirla (n=2) se firma.",
+    "rechazos": [ { "pedido": "PED-1004", "n": 1, "motivo": "Dirección incorrecta" } ],
+    "recibeFirma": "Recepción del cliente"
+  },
+  "bandejaEsperada": ["PED-1002", "PED-1004", "PED-1001", "PED-1005"]
+}
