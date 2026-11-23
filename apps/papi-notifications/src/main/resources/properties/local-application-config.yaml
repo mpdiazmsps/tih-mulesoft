@@ -1,0 +1,46 @@
+# Configuration for the local environment (the default one). Credentials live in local-secure-application-config.yaml.
+http:
+  listener:
+    host: "0.0.0.0"
+    port: "8084"
+    basePath: "/api/v1/notifications"
+
+# papi-customers completes the contact data (name and email). Locally any client_id/client_secret works.
+papi:
+  customers:
+    protocol: "HTTP"
+    host: "localhost"
+    port: "8082"
+    basePath: "/api/v1/customers-management"
+    timeoutMillis: "10000"
+    clientId: "papi-notifications-local"
+    clientSecret: "papi-notifications-local"
+
+# MagicBell (POST /broadcasts). The token lives in the secure file (D23: Maite's personal account in v1).
+magicbell:
+  host: "api.magicbell.com"
+  port: "443"
+  broadcastsPath: "/broadcasts"
+  timeoutMillis: "10000"
+
+notifications:
+  # D11: every demo email goes to this inbox (the demo contacts have fictitious emails). Empty = real recipient.
+  redirectTo: "maite.diazm98@gmail.com"
+  # Who receives "a correction is waiting for approval"
+  approverEmail: "maite.diazm98@gmail.com"
+
+# RabbitMQ (poc-rabbitmq). Each queue dead-letters to its *.dlq (infra/rabbitmq/definitions.json).
+rabbitmq:
+  host: "localhost"
+  port: "5673"
+  virtualHost: "/"
+  orderRegisteredQueue: "orders.registered.q"
+  approvalRequestedQueue: "approval.requested.q"
+  correctionAppliedQueue: "correction.applied.q"
+  # A message is tried 1 + retryMax times (3 in total) and then rejected to its DLQ
+  retryMax: "2"
+  retryMillis: "2000"
+
+# Seconds suggested to the consumer in the Retry-After header when a backend is unavailable
+error:
+  retryAfterSeconds: "30"

@@ -1,0 +1,9 @@
+# Build and Studio output
+target/
+.mule/
+.classpath
+.project
+.settings/
+
+# Local credentials: encrypted MagicBell token and RabbitMQ user and password
+src/main/resources/properties/*-secure-application-config.yaml

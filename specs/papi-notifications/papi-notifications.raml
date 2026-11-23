@@ -1,0 +1,147 @@
+#%RAML 1.0
+title: papi-notifications
+version: v1
+baseUri: https://{host}/api/{version}/notifications
+baseUriParameters:
+  host:
+    description: Public CloudHub 2.0 endpoint of the papi-notifications application.
+    type: string
+    example: papi-notifications-a1b2c3.usa-e1.cloudhub.io
+protocols: [HTTPS]
+mediaType: application/json
+description: |
+  Notifies customers and approvers by email. It consumes events from RabbitMQ (exchange `orders.events`),
+  completes the contact data with papi-customers and sends through MagicBell (`POST /broadcasts`).
+  Its triggers are AMQP listeners, which are not HTTP and are documented here:
+  - `order.registered` (queue `orders.registered.q`, type `OrderRegisteredEvent`): order confirmation to the customer.
+    Only the regular confirmation cycle publishes it (D8).
+  - `approval.requested` (queue `approval.requested.q`, type `ApprovalRequestedEvent`): a correction request waits
+    for the approver.
+  - `correction.applied` (queue `correction.applied.q`, type `CorrectionAppliedEvent`): the correction was applied.
+    It is the only customer email of a correction (D18).
+  Each queue has its dead-letter queue (`*.dlq`): a message that fails three times goes there.
+  In the demo every email goes to the inbox in `notifications.redirectTo` (D11): the demo contacts have fictitious emails.
+  The HTTP resource resends an order confirmation by hand (tests and support).
+
+uses:
+  common: ../fragments/poc-common/poc-common.raml
+
+types:
+  ApprovalRequestedEvent:
+    description: approval.requested event, published by papi-order-requests when a request is created.
+    type: object
+    properties:
+      eventType:
+        type: string
+        enum: [approval.requested]
+      requestId: common.Uuid
+      orderId: common.Uuid
+      customerId: common.SalesforceId
+      type: common.RequestType
+      amount:
+        type: number
+        description: quantity × quote price.
+      currency: common.Currency
+      requestedBy: string
+      expiresAt: datetime
+      occurredAt: datetime
+    example:
+      eventType: approval.requested
+      requestId: 30000000-0000-4000-8000-000000000042
+      orderId: 10000000-0000-4000-8000-000000001002
+      customerId: 003Hs00000CUMBRAAA
+      type: RESTOCK
+      amount: 525.00
+      currency: MXN
+      requestedBy: agente-mcp
+      expiresAt: 2026-11-21T12:40:00-06:00
+      occurredAt: 2026-11-20T12:40:00-06:00
+  CorrectionAppliedEvent:
+    description: correction.applied event, published once by papi-order-requests when the request is COMPLETED (D18).
+    type: object
+    properties:
+      eventType:
+        type: string
+        enum: [correction.applied]
+      requestId: common.Uuid
+      orderId: common.Uuid
+      customerId: common.SalesforceId
+      type: common.RequestType
+      detail:
+        type: object
+        properties:
+          itemId:
+            type: common.Uuid
+            required: false
+          sku:
+            type: string
+            required: false
+          quantity:
+            type: integer
+            required: false
+          provider:
+            type: common.ProviderAbv
+            required: false
+          dispatchNoteId:
+            type: string
+            required: false
+      occurredAt: datetime
+    example:
+      eventType: correction.applied
+      requestId: 30000000-0000-4000-8000-000000000042
+      orderId: 10000000-0000-4000-8000-000000001002
+      customerId: 003Hs00000CUMBRAAA
+      type: RESTOCK
+      detail:
+        itemId: 20000000-0000-4000-8000-000000000100
+        sku: SKU-100
+        quantity: 3
+        provider: BOR
+        dispatchNoteId: 10000000-0000-4000-8000-000000001002-1
+      occurredAt: 2026-11-20T12:45:00-06:00
+  NotificationResult:
+    description: Result of processing one event.
+    type: object
+    properties:
+      status:
+        type: string
+        enum: [SENT, SKIPPED]
+        description: SKIPPED when the customer has no email.
+      recipient:
+        type: string
+        required: false
+        description: Address the email went to (the redirectTo inbox in the demo).
+      broadcastId:
+        type: string
+        required: false
+        description: MagicBell broadcast id.
+    example:
+      status: SENT
+      recipient: demo@ejemplo.mx
+      broadcastId: 6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b
+
+/orders-registered:
+  post:
+    displayName: Resend order confirmation
+    description: Processes an order.registered event by hand and emails the customer (tests and support).
+    is: [common.secured, common.validated, common.bad-gateway, common.retryable]
+    body:
+      application/json:
+        type: common.OrderRegisteredEvent
+    responses:
+      200:
+        description: Event processed. The status says whether the email was sent or skipped.
+        body:
+          application/json:
+            type: NotificationResult
+      404:
+        description: The customer of the event does not exist.
+        body:
+          application/json:
+            type: common.ErrorResponse
+            example:
+              code: CUSTOMER_NOT_FOUND
+              message: The customer does not exist
+              correlationId: 0b6f2f0e-4a0c-4d25-9a4c-3d9e6a7b1c2d
+              timestamp: 2026-11-20T12:00:00-06:00
+              retryable: false

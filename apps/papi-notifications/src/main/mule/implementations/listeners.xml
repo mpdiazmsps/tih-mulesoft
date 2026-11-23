@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:amqp="http://www.mulesoft.org/schema/mule/amqp"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/amqp http://www.mulesoft.org/schema/mule/amqp/current/mule-amqp.xsd
+		http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+	<!-- One listener per queue, all with manual ACK. The processing lives in event-consume-subflow:
+	     ACK when the email was sent or skipped; reject without requeue (to the queue DLQ) after three failed attempts
+	     or right away when the failure is permanent. -->
+
+	<flow name="order-registered-listener-flow" doc:name="order-registered-listener-flow"
+		doc:description="Listens to orders.registered.q: order confirmation to the customer">
+		<amqp:listener config-ref="rabbitmq-amqp-config" queueName="${rabbitmq.orderRegisteredQueue}" ackMode="MANUAL"
+			doc:name="amqp-listener-orders-registered" doc:description="Receives an order.registered event; it stays pending until ACK or reject"/>
+		<set-variable variableName="ackId" value="#[attributes.ackId]" doc:name="set-ack-id"
+			doc:description="Keeps the delivery tag: the HTTP calls replace the message attributes"/>
+		<set-variable variableName="eventKind" value="order.registered" doc:name="set-event-kind" doc:description="Event of this queue"/>
+		<flow-ref name="event-consume-subflow" doc:name="flow-ref-event-consume" doc:description="Notifies with retries and ACKs or rejects"/>
+	</flow>
+
+	<flow name="approval-requested-listener-flow" doc:name="approval-requested-listener-flow"
+		doc:description="Listens to approval.requested.q: a correction waits for the approver">
+		<amqp:listener config-ref="rabbitmq-amqp-config" queueName="${rabbitmq.approvalRequestedQueue}" ackMode="MANUAL"
+			doc:name="amqp-listener-approval-requested" doc:description="Receives an approval.requested event; it stays pending until ACK or reject"/>
+		<set-variable variableName="ackId" value="#[attributes.ackId]" doc:name="set-ack-id"
+			doc:description="Keeps the delivery tag: the HTTP calls replace the message attributes"/>
+		<set-variable variableName="eventKind" value="approval.requested" doc:name="set-event-kind" doc:description="Event of this queue"/>
+		<flow-ref name="event-consume-subflow" doc:name="flow-ref-event-consume" doc:description="Notifies with retries and ACKs or rejects"/>
+	</flow>
+
+	<flow name="correction-applied-listener-flow" doc:name="correction-applied-listener-flow"
+		doc:description="Listens to correction.applied.q: the only customer email of a correction (D18)">
+		<amqp:listener config-ref="rabbitmq-amqp-config" queueName="${rabbitmq.correctionAppliedQueue}" ackMode="MANUAL"
+			doc:name="amqp-listener-correction-applied" doc:description="Receives a correction.applied event; it stays pending until ACK or reject"/>
+		<set-variable variableName="ackId" value="#[attributes.ackId]" doc:name="set-ack-id"
+			doc:description="Keeps the delivery tag: the HTTP calls replace the message attributes"/>
+		<set-variable variableName="eventKind" value="correction.applied" doc:name="set-event-kind" doc:description="Event of this queue"/>
+		<flow-ref name="event-consume-subflow" doc:name="flow-ref-event-consume" doc:description="Notifies with retries and ACKs or rejects"/>
+	</flow>
+
+	<sub-flow name="event-consume-subflow" doc:name="event-consume-subflow"
+		doc:description="Notifies the event: ACK when sent or skipped; reject without requeue (DLQ) on a permanent failure or after three attempts">
+		<set-variable variableName="permanentFailure" value="#[false]" doc:name="set-permanent-failure"
+			doc:description="Becomes true when retrying makes no sense (customer missing, MagicBell rejects)"/>
+		<try doc:name="try-consume" doc:description="Any error that reaches this point rejects the message to its DLQ">
+			<ee:transform doc:name="transform-parse-event" doc:description="Reads the message body once, before the retries">
+				<ee:message>
+					<ee:set-payload><![CDATA[%dw 2.0
+output application/java
+---
+if ((payload is String) or (payload is Binary)) read(payload, "application/json") else payload]]></ee:set-payload>
+				</ee:message>
+			</ee:transform>
+			<until-successful maxRetries="${rabbitmq.retryMax}" millisBetweenRetries="${rabbitmq.retryMillis}"
+				doc:name="until-successful-notify" doc:description="Up to three attempts for transient errors (MagicBell or papi-customers down, 5xx, timeout)">
+				<try doc:name="try-notify" doc:description="Permanent errors are not retried: they are flagged and the flow goes on">
+					<flow-ref name="event-dispatch-subflow" doc:name="flow-ref-event-dispatch" doc:description="Sends the email of this event"/>
+					<error-handler>
+						<on-error-continue type="APP:CUSTOMER_NOT_FOUND, APP:NOTIFICATION_REJECTED, HTTP:UNAUTHORIZED, HTTP:FORBIDDEN, HTTP:BAD_REQUEST, HTTP:NOT_FOUND, HTTP:CLIENT_SECURITY, HTTP:SECURITY"
+							logException="false" doc:name="on-error-permanent" doc:description="Retrying does not help: flag the message for reject">
+							<logger level="ERROR"
+								message="#[output application/java --- 'ERROR - Permanent failure on ' ++ vars.eventKind ++ ', rejecting to DLQ: ' ++ (error.errorType.namespace default 'MULE') ++ ':' ++ (error.errorType.identifier default 'ANY') ++ ' correlationId: ' ++ correlationId]"
+								doc:name="logger-permanent-failure" doc:description="Logs the permanent error"/>
+							<set-variable variableName="permanentFailure" value="#[true]" doc:name="set-permanent-failure-true"
+								doc:description="Flags the message for immediate reject"/>
+						</on-error-continue>
+					</error-handler>
+				</try>
+			</until-successful>
+			<choice doc:name="choice-permanent-failure" doc:description="Rejects on a permanent failure; otherwise ACK">
+				<when expression="#[vars.permanentFailure]">
+					<amqp:reject ackId="#[vars.ackId]" requeue="false" doc:name="amqp-reject-permanent"
+						doc:description="Reject without requeue: the dead-letter exchange sends it to the queue DLQ"/>
+				</when>
+				<otherwise>
+					<amqp:ack ackId="#[vars.ackId]" doc:name="amqp-ack" doc:description="Email sent or skipped: the message leaves the queue"/>
+				</otherwise>
+			</choice>
+			<error-handler>
+				<on-error-continue type="ANY" logException="false" doc:name="on-error-reject"
+					doc:description="Retries exhausted or unreadable event: reject without requeue to the DLQ">
+					<logger level="ERROR"
+						message="#[output application/java --- 'ERROR - ' ++ (vars.eventKind default 'event') ++ ' failed three times or is unreadable, rejecting to DLQ: ' ++ (error.errorType.namespace default 'MULE') ++ ':' ++ (error.errorType.identifier default 'ANY') ++ ' correlationId: ' ++ correlationId]"
+						doc:name="logger-reject-to-dlq" doc:description="Logs why the message goes to the DLQ"/>
+					<amqp:reject ackId="#[vars.ackId]" requeue="false" doc:name="amqp-reject-exhausted"
+						doc:description="Reject without requeue so the message reaches the DLQ"/>
+				</on-error-continue>
+			</error-handler>
+		</try>
+	</sub-flow>
+
+	<sub-flow name="event-dispatch-subflow" doc:name="event-dispatch-subflow" doc:description="Routes the event to its email">
+		<choice doc:name="choice-event-kind" doc:description="One email per event kind">
+			<when expression="#[vars.eventKind == 'approval.requested']">
+				<flow-ref name="notify-approval-requested-subflow" doc:name="flow-ref-notify-approval-requested" doc:description="Email to the approver"/>
+			</when>
+			<when expression="#[vars.eventKind == 'correction.applied']">
+				<flow-ref name="notify-correction-applied-subflow" doc:name="flow-ref-notify-correction-applied" doc:description="Email to the customer (D18)"/>
+			</when>
+			<otherwise>
+				<flow-ref name="notify-order-registered-flow" doc:name="flow-ref-notify-order-registered" doc:description="Order confirmation to the customer"/>
+			</otherwise>
+		</choice>
+	</sub-flow>
+
+</mule>

@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+		http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+	<!-- order.registered: the HTTP resend and the listener share this flow. -->
+	<flow name="notify-order-registered-flow" doc:name="notify-order-registered-flow"
+		doc:description="Order confirmation: gets the customer and, when it has an email, sends it through MagicBell">
+		<set-variable variableName="event" value="#[output application/java --- payload]" doc:name="set-event"
+			doc:description="Keeps the event: the HTTP calls replace the payload"/>
+		<logger level="INFO" message="#[output application/java --- 'INIT - order.registered email, orderId: ' ++ (vars.event.orderId default 'n/a') ++ ' correlationId: ' ++ correlationId]"
+			doc:name="logger-order-registered-start" doc:description="Logs the start. The customer email is not logged"/>
+		<flow-ref name="customer-get-subflow" doc:name="flow-ref-customer-get" doc:description="Customer name and email (404 -> CUSTOMER_NOT_FOUND)"/>
+		<set-variable variableName="mail" doc:name="set-mail" doc:description="Order confirmation email"
+			value="#[output application/java --- do { import orderRegisteredEmail from modules::notifications --- orderRegisteredEmail(vars.event, vars.customer) }]"/>
+		<flow-ref name="customer-email-send-subflow" doc:name="flow-ref-customer-email-send" doc:description="Sends it, or skips when the customer has no email"/>
+	</flow>
+
+	<sub-flow name="notify-approval-requested-subflow" doc:name="notify-approval-requested-subflow"
+		doc:description="approval.requested: tells the approver that a correction is waiting for a decision">
+		<set-variable variableName="event" value="#[output application/java --- payload]" doc:name="set-event"
+			doc:description="Keeps the event: the HTTP calls replace the payload"/>
+		<logger level="INFO" message="#[output application/java --- 'INIT - approval.requested email, requestId: ' ++ (vars.event.requestId default 'n/a') ++ ' correlationId: ' ++ correlationId]"
+			doc:name="logger-approval-requested-start" doc:description="Logs the start"/>
+		<try doc:name="try-customer-name" doc:description="The approver is told even when the customer is not found">
+			<flow-ref name="customer-get-subflow" doc:name="flow-ref-customer-get" doc:description="Customer name for the email"/>
+			<error-handler>
+				<on-error-continue type="APP:CUSTOMER_NOT_FOUND" logException="false" doc:name="on-error-customer-not-found"
+					doc:description="Uses the customer id instead of the name">
+					<set-variable variableName="customer" value="#[output application/java --- { name: vars.event.customerId }]"
+						doc:name="set-customer-fallback" doc:description="Customer id as name"/>
+				</on-error-continue>
+			</error-handler>
+		</try>
+		<set-variable variableName="mail" doc:name="set-mail" doc:description="Email for the approver"
+			value="#[output application/java --- do { import approvalRequestedEmail from modules::notifications --- approvalRequestedEmail(vars.event, vars.customer.name, p('notifications.approverEmail')) }]"/>
+		<flow-ref name="broadcast-send-subflow" doc:name="flow-ref-broadcast-send" doc:description="Sends it through MagicBell"/>
+	</sub-flow>
+
+	<sub-flow name="notify-correction-applied-subflow" doc:name="notify-correction-applied-subflow"
+		doc:description="correction.applied: the only customer email of a correction (D18)">
+		<set-variable variableName="event" value="#[output application/java --- payload]" doc:name="set-event"
+			doc:description="Keeps the event: the HTTP calls replace the payload"/>
+		<logger level="INFO" message="#[output application/java --- 'INIT - correction.applied email, requestId: ' ++ (vars.event.requestId default 'n/a') ++ ' correlationId: ' ++ correlationId]"
+			doc:name="logger-correction-applied-start" doc:description="Logs the start. The customer email is not logged"/>
+		<flow-ref name="customer-get-subflow" doc:name="flow-ref-customer-get" doc:description="Customer name and email (404 -> CUSTOMER_NOT_FOUND)"/>
+		<set-variable variableName="mail" doc:name="set-mail" doc:description="Correction email for the customer"
+			value="#[output application/java --- do { import correctionAppliedEmail from modules::notifications --- correctionAppliedEmail(vars.event, vars.customer) }]"/>
+		<flow-ref name="customer-email-send-subflow" doc:name="flow-ref-customer-email-send" doc:description="Sends it, or skips when the customer has no email"/>
+	</sub-flow>
+
+	<sub-flow name="customer-get-subflow" doc:name="customer-get-subflow" doc:description="GET papi-customers /customers/{id} into vars.customer">
+		<http:request method="GET" config-ref="papi-customers-http-config" path="#['/customers/' ++ (vars.event.customerId default '')]"
+			doc:name="http-request-get-customer" doc:description="Customer of the event">
+			<http:headers>#[{ 'x-correlation-id': correlationId }]</http:headers>
+			<http:response-validator>
+				<http:success-status-code-validator values="200..299,404"/>
+			</http:response-validator>
+		</http:request>
+		<choice doc:name="choice-customer-found" doc:description="404 means the customer does not exist">
+			<when expression="#[attributes.statusCode == 404]">
+				<raise-error type="APP:CUSTOMER_NOT_FOUND" description="The customer does not exist"
+					doc:name="raise-customer-not-found" doc:description="Permanent error: answered as 404 and rejected to the DLQ"/>
+			</when>
+		</choice>
+		<set-variable variableName="customer" value="#[output application/java --- payload]" doc:name="set-customer" doc:description="Customer returned by papi-customers"/>
+	</sub-flow>
+
+	<sub-flow name="customer-email-send-subflow" doc:name="customer-email-send-subflow"
+		doc:description="Sends vars.mail when the customer has an email; otherwise the result is SKIPPED">
+		<choice doc:name="choice-has-email" doc:description="Without an email there is nobody to write to">
+			<when expression="#[isEmpty(vars.mail.to)]">
+				<logger level="WARN" message="#[output application/java --- 'WARN - Customer without email, ' ++ (vars.mail.category default 'email') ++ ' skipped, orderId: ' ++ (vars.event.orderId default 'n/a') ++ ' correlationId: ' ++ correlationId]"
+					doc:name="logger-no-email" doc:description="Logs the skipped email"/>
+				<set-payload value="#[output application/json --- { status: 'SKIPPED' }]" doc:name="set-result-skipped" doc:description="NotificationResult SKIPPED"/>
+			</when>
+			<otherwise>
+				<flow-ref name="broadcast-send-subflow" doc:name="flow-ref-broadcast-send" doc:description="Sends it through MagicBell"/>
+			</otherwise>
+		</choice>
+	</sub-flow>
+
+	<sub-flow name="broadcast-send-subflow" doc:name="broadcast-send-subflow"
+		doc:description="POST /broadcasts with vars.mail, redirected to notifications.redirectTo in the demo (D11). Result: NotificationResult SENT">
+		<set-variable variableName="recipient" doc:name="set-recipient" doc:description="redirectTo when set, otherwise the real recipient"
+			value="#[output application/java --- do { import recipientFor from modules::notifications --- recipientFor(vars.mail.to, p('notifications.redirectTo')) }]"/>
+		<http:request method="POST" config-ref="magicbell-http-config" path="${magicbell.broadcastsPath}"
+			doc:name="http-request-magicbell-broadcast" doc:description="POST /broadcasts in MagicBell with the project token">
+			<http:body><![CDATA[#[output application/json --- do { import broadcast from modules::notifications --- broadcast(vars.mail, vars.recipient) }]]]></http:body>
+			<http:response-validator>
+				<http:success-status-code-validator values="200..299,422"/>
+			</http:response-validator>
+		</http:request>
+		<choice doc:name="choice-magicbell-rejected" doc:description="The HTTP connector has no error type for 422: it becomes a business error">
+			<when expression="#[attributes.statusCode == 422]">
+				<raise-error type="APP:NOTIFICATION_REJECTED" description="MagicBell rejected the notification"
+					doc:name="raise-notification-rejected" doc:description="Permanent error: answered as 502 PROVIDER_REJECTED and rejected to the DLQ"/>
+			</when>
+		</choice>
+		<set-payload doc:name="set-result-sent" doc:description="NotificationResult SENT with the recipient and the broadcast id"
+			value="#[output application/json --- do { var id = payload.id default payload.broadcast.id --- { status: 'SENT', recipient: vars.recipient, (broadcastId: id) if (id != null) } }]"/>
+		<logger level="INFO" message="#[output application/java --- 'END - ' ++ (vars.mail.category default 'email') ++ ' sent, broadcastId: ' ++ (payload.broadcastId default 'n/a') ++ ' correlationId: ' ++ correlationId]"
+			doc:name="logger-broadcast-sent" doc:description="Logs the sent email. The recipient is not logged"/>
+	</sub-flow>
+
+</mule>

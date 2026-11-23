@@ -1,0 +1,9 @@
+# Copy as local-secure-application-config.yaml (ignored by Git) and fill in with values encrypted as ![...]
+# with the POC_ENC_KEY key (AES/CBC, secure-mule-app skill).
+magicbell:
+  # ACCESS_TOKEN of infra/magicbell/credentials.local (MagicBell project token, D23)
+  token: "![CHANGE_ME]"
+rabbitmq:
+  # RABBITMQ_APP_USER / RABBITMQ_APP_PASSWORD of infra/rabbitmq/credentials.local
+  user: "![CHANGE_ME]"
+  password: "![CHANGE_ME]"

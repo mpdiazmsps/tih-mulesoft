@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:apikit="http://www.mulesoft.org/schema/mule/mule-apikit"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+		http://www.mulesoft.org/schema/mule/mule-apikit http://www.mulesoft.org/schema/mule/mule-apikit/current/mule-apikit.xsd">
+
+	<apikit:config name="papi-notifications-config"
+		api="resource::9885f017-0660-4c80-a27f-eb006d124bd8:papi-notifications:1.0.0:raml:zip:papi-notifications.raml"
+		outboundHeadersMapName="outboundHeaders"
+		httpStatusVarName="httpStatus"
+		doc:name="APIkit Router config"
+		doc:description="Validates each request against the papi-notifications RAML and routes it to its interface flow"/>
+
+	<flow name="papi-notifications-main"
+		doc:name="papi-notifications-main"
+		doc:description="HTTP entry point. Errors are handled by the global error handler">
+		<http:listener config-ref="papi-notifications-httpListenerConfig" path="${http.listener.basePath}/*"
+			doc:name="Listener"
+			doc:description="Receives requests on the API base path">
+			<http:response statusCode="#[vars.httpStatus default 200]">
+				<http:headers>#[vars.outboundHeaders default {}]</http:headers>
+			</http:response>
+			<http:error-response statusCode="#[vars.httpStatus default 500]">
+				<http:body>#[payload]</http:body>
+				<http:headers>#[vars.outboundHeaders default {}]</http:headers>
+			</http:error-response>
+		</http:listener>
+		<apikit:router config-ref="papi-notifications-config"
+			doc:name="APIkit Router"
+			doc:description="Routes the request to the interface flow matching the RAML method and resource"/>
+	</flow>
+
+	<!-- Interface flow with the APIkit scaffolding name: it only delegates to the implementation. Do not rename. -->
+
+	<flow name="post:\orders-registered:application\json:papi-notifications-config" doc:name="post:\orders-registered" doc:description="Resend order confirmation">
+		<flow-ref name="notify-order-registered-flow" doc:name="notify-order-registered-flow" doc:description="Delegates to the order confirmation email"/>
+	</flow>
+
+</mule>
