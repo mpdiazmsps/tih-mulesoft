@@ -1,0 +1,9 @@
+# Salida de build y de Studio
+target/
+.mule/
+.classpath
+.project
+.settings/
+
+# Local credentials: encrypted Oracle and RabbitMQ users and passwords
+src/main/resources/properties/*-secure-application-config.yaml

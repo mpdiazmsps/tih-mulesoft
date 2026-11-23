@@ -1,0 +1,222 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:amqp="http://www.mulesoft.org/schema/mule/amqp"
+	xmlns:db="http://www.mulesoft.org/schema/mule/db"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/amqp http://www.mulesoft.org/schema/mule/amqp/current/mule-amqp.xsd
+		http://www.mulesoft.org/schema/mule/db http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd
+		http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+		http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+	<!-- Decisions (P08 state machine, P11 human checkpoint). PENDING -> APPROVED -> APPLYING -> COMPLETED or FAILED;
+	     from PENDING also REJECTED or EXPIRED. Each transition is a conditional UPDATE (WHERE STATUS = from) plus a
+	     history step, so a request moves once even with two calls at the same time. Only approvers decide (D10). -->
+
+	<!-- ============================================================ POST /order-requests/{id}/approve -->
+	<flow name="requests-approve-flow" doc:name="requests-approve-flow"
+		doc:description="Approves a PENDING request and applies it through papi-orders; ends COMPLETED (correction.applied once) or FAILED">
+		<flow-ref name="decision-prepare-subflow" doc:name="flow-ref-decision-prepare" doc:description="Approver check and current request"/>
+		<choice doc:name="choice-expired" doc:description="A PENDING request past its deadline expires instead of being approved">
+			<when expression="#[vars.requestRow.STATUS == 'PENDING' and vars.isExpired]" doc:name="when-expired" doc:description="Past the deadline">
+				<flow-ref name="request-expire-subflow" doc:name="flow-ref-request-expire" doc:description="Marks it EXPIRED"/>
+				<raise-error type="APP:INVALID_TRANSITION" description="The request expired without a decision" doc:name="raise-expired" doc:description="Returns 409"/>
+			</when>
+		</choice>
+		<set-variable variableName="transition" doc:name="set-transition-approve" doc:description="PENDING to APPROVED by the approver"
+			value="#[output application/java --- { 'from': 'PENDING', to: 'APPROVED', decision: true, reason: null, note: 'Approved' }]"/>
+		<flow-ref name="request-transition-subflow" doc:name="flow-ref-transition-approve" doc:description="Conditional update and history step"/>
+		<set-variable variableName="applyFrom" value="APPROVED" doc:name="set-apply-from" doc:description="Apply from APPROVED"/>
+		<flow-ref name="request-apply-subflow" doc:name="flow-ref-request-apply" doc:description="APPLYING, papi-orders correction, COMPLETED or FAILED"/>
+		<flow-ref name="request-load-subflow" doc:name="flow-ref-request-load" doc:description="The request after the decision"/>
+		<set-payload value="#[output application/json --- vars.request]" doc:name="set-payload-request" doc:description="The request with its history"/>
+	</flow>
+
+	<!-- ============================================================= POST /order-requests/{id}/reject -->
+	<flow name="requests-reject-flow" doc:name="requests-reject-flow" doc:description="Rejects a PENDING request with a reason; nothing is applied or published">
+		<set-variable variableName="rejectReason" value="#[output application/java --- payload.reason]" doc:name="set-reject-reason" doc:description="Why the approver rejects"/>
+		<flow-ref name="decision-prepare-subflow" doc:name="flow-ref-decision-prepare" doc:description="Approver check and current request"/>
+		<set-variable variableName="transition" doc:name="set-transition-reject" doc:description="PENDING to REJECTED by the approver"
+			value="#[output application/java --- { 'from': 'PENDING', to: 'REJECTED', decision: true, reason: vars.rejectReason, note: vars.rejectReason }]"/>
+		<flow-ref name="request-transition-subflow" doc:name="flow-ref-transition-reject" doc:description="Conditional update and history step"/>
+		<flow-ref name="request-load-subflow" doc:name="flow-ref-request-load" doc:description="The request after the decision"/>
+		<set-payload value="#[output application/json --- vars.request]" doc:name="set-payload-request" doc:description="The request with its history"/>
+	</flow>
+
+	<!-- ============================================================== POST /order-requests/{id}/retry -->
+	<flow name="requests-retry-flow" doc:name="requests-retry-flow" doc:description="Applies a FAILED request again with the same key (papi-orders moves nothing twice)">
+		<flow-ref name="decision-prepare-subflow" doc:name="flow-ref-decision-prepare" doc:description="Approver check and current request"/>
+		<choice doc:name="choice-is-failed" doc:description="Only a FAILED request is retried">
+			<when expression="#[vars.requestRow.STATUS != 'FAILED']" doc:name="when-not-failed" doc:description="Nothing to retry">
+				<raise-error type="APP:INVALID_TRANSITION" description="#[output application/java --- 'The request is ' ++ vars.requestRow.STATUS ++ '; only a FAILED request can be retried']"
+					doc:name="raise-not-failed" doc:description="Returns 409"/>
+			</when>
+		</choice>
+		<set-variable variableName="applyFrom" value="FAILED" doc:name="set-apply-from" doc:description="Apply from FAILED"/>
+		<flow-ref name="request-apply-subflow" doc:name="flow-ref-request-apply" doc:description="APPLYING, papi-orders correction, COMPLETED or FAILED"/>
+		<flow-ref name="request-load-subflow" doc:name="flow-ref-request-load" doc:description="The request after the retry"/>
+		<set-payload value="#[output application/json --- vars.request]" doc:name="set-payload-request" doc:description="The request with its history"/>
+	</flow>
+
+	<!-- ================================================================== Shared decision steps -->
+	<sub-flow name="decision-prepare-subflow" doc:name="decision-prepare-subflow"
+		doc:description="Only approvers decide (403 otherwise, D10); reads the current request (404) and whether it is past its deadline">
+		<set-variable variableName="actor" value="#[output application/java --- attributes.headers.'x-client-app']" doc:name="set-actor" doc:description="Client application that decides"/>
+		<set-variable variableName="requestId" value="#[output application/java --- attributes.uriParams.requestId]" doc:name="set-request-id" doc:description="Request id from the path"/>
+		<choice doc:name="choice-is-approver" doc:description="The agent can never approve">
+			<when expression="#[output application/java --- do { import isApprover from modules::requests --- not isApprover(vars.actor, p('approval.approverClientIds')) }]"
+				doc:name="when-not-approver" doc:description="The caller is not a configured approver">
+				<raise-error type="APP:FORBIDDEN" description="Only an approver can decide on a request" doc:name="raise-forbidden" doc:description="Returns 403"/>
+			</when>
+		</choice>
+		<db:select config-ref="requests-db-config" doc:name="db-select-request-state" doc:description="Current status and whether the deadline passed">
+			<db:sql><![CDATA[SELECT STATUS, CASE WHEN EXPIRES_AT < SYSTIMESTAMP THEN 1 ELSE 0 END AS IS_EXPIRED FROM ORDER_REQUESTS WHERE ID = :id]]></db:sql>
+			<db:input-parameters><![CDATA[#[output application/java --- { id: vars.requestId }]]]></db:input-parameters>
+		</db:select>
+		<choice doc:name="choice-request-found" doc:description="404 when the request does not exist">
+			<when expression="#[isEmpty(payload)]" doc:name="when-request-unknown" doc:description="Unknown request">
+				<raise-error type="APP:REQUEST_NOT_FOUND" description="The request does not exist" doc:name="raise-request-unknown" doc:description="Returns 404"/>
+			</when>
+		</choice>
+		<set-variable variableName="requestRow" value="#[output application/java --- payload[0]]" doc:name="set-request-row" doc:description="Current status"/>
+		<set-variable variableName="isExpired" value="#[output application/java --- (payload[0].IS_EXPIRED as Number) == 1]" doc:name="set-is-expired" doc:description="Past the deadline"/>
+	</sub-flow>
+
+	<sub-flow name="request-transition-subflow" doc:name="request-transition-subflow"
+		doc:description="Moves vars.requestId from vars.transition.from to .to with a history step; 409 when it is not in the expected status">
+		<try transactionalAction="ALWAYS_BEGIN" transactionType="LOCAL" doc:name="try-transition" doc:description="Status and history step together">
+			<db:update config-ref="requests-db-config" doc:name="db-update-request-status" doc:description="Changes the status only from the expected one (avoids double decisions)">
+				<db:sql><![CDATA[UPDATE ORDER_REQUESTS
+   SET STATUS = :toStatus,
+       DECIDED_BY = CASE WHEN :decision = 1 THEN :actor ELSE DECIDED_BY END,
+       DECIDED_AT = CASE WHEN :decision = 1 THEN SYSTIMESTAMP ELSE DECIDED_AT END,
+       REASON = NVL(:reason, REASON),
+       UPDATED_AT = SYSTIMESTAMP
+ WHERE ID = :id AND STATUS = :fromStatus]]></db:sql>
+				<db:input-parameters><![CDATA[#[output application/java --- { id: vars.requestId, fromStatus: vars.transition.'from', toStatus: vars.transition.to,
+	decision: if (vars.transition.decision default false) 1 else 0, actor: vars.actor default p('requests.defaultActor'), reason: vars.transition.reason }]]]></db:input-parameters>
+			</db:update>
+			<choice doc:name="choice-transition-done" doc:description="No updated row: the request is no longer in the expected status">
+				<when expression="#[payload.affectedRows == 0]" doc:name="when-transition-refused" doc:description="Invalid transition">
+					<raise-error type="APP:INVALID_TRANSITION"
+						description="#[output application/java --- 'The request is ' ++ (vars.requestRow.STATUS default 'in another status') ++ '; it cannot move from ' ++ vars.transition.'from' ++ ' to ' ++ vars.transition.to]"
+						doc:name="raise-transition-refused" doc:description="Returns 409 and nothing changes"/>
+				</when>
+			</choice>
+			<db:insert config-ref="requests-db-config" doc:name="db-insert-event" doc:description="History step with who and when">
+				<db:sql><![CDATA[INSERT INTO ORDER_REQUEST_EVENTS (ID, REQUEST_ID, FROM_STATUS, TO_STATUS, ACTOR, DETAIL) VALUES (:id, :requestId, :fromStatus, :toStatus, :actor, :detail)]]></db:sql>
+				<db:input-parameters><![CDATA[#[output application/java --- { id: uuid(), requestId: vars.requestId, fromStatus: vars.transition.'from', toStatus: vars.transition.to,
+	actor: vars.transition.actor default (vars.actor default p('requests.defaultActor')), detail: vars.transition.note }]]]></db:input-parameters>
+			</db:insert>
+		</try>
+		<set-variable variableName="requestRow" value="#[output application/java --- { STATUS: vars.transition.to }]" doc:name="set-request-row-status" doc:description="New status"/>
+	</sub-flow>
+
+	<!-- ================================================================== Applying a correction -->
+	<sub-flow name="request-apply-subflow" doc:name="request-apply-subflow"
+		doc:description="APPLYING, then papi-orders applies the correction with the request key: COMPLETED and correction.applied once, or FAILED">
+		<set-variable variableName="transition" doc:name="set-transition-applying" doc:description="To APPLYING"
+			value="#[output application/java --- { 'from': vars.applyFrom, to: 'APPLYING', decision: false, actor: 'papi-order-requests', note: 'Applying the correction' }]"/>
+		<flow-ref name="request-transition-subflow" doc:name="flow-ref-transition-applying" doc:description="Conditional update and history step"/>
+		<db:select config-ref="requests-db-config" doc:name="db-select-request-to-apply" doc:description="Order, type, key and detail of the request">
+			<db:sql><![CDATA[SELECT ORDER_ID, CUSTOMER_ID, REQUEST_TYPE, IDEMPOTENCY_KEY, ITEM_ID, PROVIDER_ABV, QTY FROM ORDER_REQUESTS WHERE ID = :id]]></db:sql>
+			<db:input-parameters><![CDATA[#[output application/java --- { id: vars.requestId }]]]></db:input-parameters>
+		</db:select>
+		<set-variable variableName="toApply" value="#[output application/java --- payload[0]]" doc:name="set-to-apply" doc:description="The request to apply"/>
+		<try doc:name="try-apply" doc:description="A failed correction ends FAILED and publishes nothing">
+			<http:request method="POST" config-ref="papi-orders-http-config" path="#[output application/java --- '/orders/' ++ vars.toApply.ORDER_ID ++ '/corrections']"
+				doc:name="http-request-apply-correction" doc:description="papi-orders applies the correction once per key (D7)">
+				<http:body><![CDATA[#[output application/json --- {
+	'type': vars.toApply.REQUEST_TYPE, key: vars.toApply.IDEMPOTENCY_KEY,
+	(itemId: vars.toApply.ITEM_ID) if (vars.toApply.ITEM_ID != null),
+	(provider: vars.toApply.PROVIDER_ABV) if (vars.toApply.PROVIDER_ABV != null),
+	(quantity: vars.toApply.QTY as Number) if (vars.toApply.QTY != null)
+}]]]></http:body>
+				<http:headers>#[output application/java --- { 'x-correlation-id': correlationId }]</http:headers>
+			</http:request>
+			<set-variable variableName="correctionResult" value="#[output application/java --- payload]" doc:name="set-correction-result" doc:description="What papi-orders did"/>
+			<set-variable variableName="transition" doc:name="set-transition-completed" doc:description="To COMPLETED"
+				value="#[output application/java --- { 'from': 'APPLYING', to: 'COMPLETED', decision: false, actor: 'papi-order-requests', note: 'Dispatch note ' ++ (vars.correctionResult.dispatchNote.dispatchNoteId default '') }]"/>
+			<flow-ref name="request-transition-subflow" doc:name="flow-ref-transition-completed" doc:description="Conditional update and history step"/>
+			<flow-ref name="publish-correction-applied-subflow" doc:name="flow-ref-publish-correction-applied" doc:description="The only customer email of a correction (D18)"/>
+			<error-handler>
+				<on-error-continue type="ANY" logException="false" doc:name="on-error-apply" doc:description="papi-orders failed: FAILED, nothing published">
+					<logger level="WARN" message="#[output application/java --- 'WARN - Request ' ++ vars.requestId ++ ' FAILED: ' ++ (error.description default '')]"
+						doc:name="logger-apply-failed" doc:description="Logs the failure"/>
+					<set-variable variableName="transition" doc:name="set-transition-failed" doc:description="To FAILED"
+						value="#[output application/java --- { 'from': 'APPLYING', to: 'FAILED', decision: false, actor: 'papi-order-requests', note: do { var d = error.description default 'Correction failed' --- if (sizeOf(d) > 990) d[0 to 989] else d } }]"/>
+					<flow-ref name="request-transition-subflow" doc:name="flow-ref-transition-failed" doc:description="Conditional update and history step"/>
+				</on-error-continue>
+			</error-handler>
+		</try>
+	</sub-flow>
+
+	<sub-flow name="publish-correction-applied-subflow" doc:name="publish-correction-applied-subflow"
+		doc:description="correction.applied once, when the request is COMPLETED (D18); a broker failure is logged">
+		<try doc:name="try-publish-correction" doc:description="The correction is already applied: a failed announcement does not undo it">
+			<amqp:publish config-ref="rabbitmq-amqp-config" exchangeName="${rabbitmq.exchange}"
+				doc:name="amqp-publish-correction-applied" doc:description="correction.applied to exchange orders.events">
+				<amqp:routing-keys>
+					<amqp:routing-key value="${rabbitmq.correctionAppliedKey}"/>
+				</amqp:routing-keys>
+				<amqp:message>
+					<amqp:body>#[output application/json --- {
+	eventType: "correction.applied", requestId: vars.requestId, orderId: vars.toApply.ORDER_ID, customerId: vars.toApply.CUSTOMER_ID,
+	"type": vars.toApply.REQUEST_TYPE,
+	detail: {
+		(itemId: vars.toApply.ITEM_ID) if (vars.toApply.ITEM_ID != null),
+		(quantity: vars.toApply.QTY as Number) if (vars.toApply.QTY != null),
+		(provider: vars.toApply.PROVIDER_ABV) if (vars.toApply.PROVIDER_ABV != null),
+		(dispatchNoteId: vars.correctionResult.dispatchNote.dispatchNoteId) if (vars.correctionResult.dispatchNote.dispatchNoteId != null)
+	},
+	occurredAt: (now() >> "UTC") as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
+}]</amqp:body>
+					<amqp:properties contentType="application/json"/>
+				</amqp:message>
+			</amqp:publish>
+			<error-handler>
+				<on-error-continue type="ANY" logException="false" doc:name="on-error-publish-correction" doc:description="Logs the lost announcement">
+					<logger level="WARN" message="#[output application/java --- 'WARN - correction.applied not published for request ' ++ vars.requestId ++ ': ' ++ (error.description default '')]"
+						doc:name="logger-publish-correction-failed" doc:description="Logs the failure"/>
+				</on-error-continue>
+			</error-handler>
+		</try>
+	</sub-flow>
+
+	<!-- ================================================================== Expiry (every 5 minutes) -->
+	<flow name="requests-expiry-scheduler-flow" initialState="${requests.expiryInitialState}" doc:name="requests-expiry-scheduler-flow"
+		doc:description="Every 5 minutes marks EXPIRED the PENDING requests past their deadline (24 h without a decision)">
+		<scheduler doc:name="scheduler-expiry" doc:description="Every requests.expiryFrequencyMillis">
+			<scheduling-strategy>
+				<fixed-frequency frequency="${requests.expiryFrequencyMillis}" startDelay="60000"/>
+			</scheduling-strategy>
+		</scheduler>
+		<flow-ref name="requests-expire-due-subflow" doc:name="flow-ref-expire-due" doc:description="Expires the due requests"/>
+	</flow>
+
+	<sub-flow name="requests-expire-due-subflow" doc:name="requests-expire-due-subflow" doc:description="PENDING requests past their deadline become EXPIRED, each with its history step">
+		<db:select config-ref="requests-db-config" doc:name="db-select-due-requests" doc:description="PENDING requests past their deadline">
+			<db:sql><![CDATA[SELECT ID FROM ORDER_REQUESTS WHERE STATUS = 'PENDING' AND EXPIRES_AT < SYSTIMESTAMP]]></db:sql>
+		</db:select>
+		<foreach collection="#[payload]" doc:name="foreach-due-request" doc:description="One request at a time">
+			<set-variable variableName="requestId" value="#[output application/java --- payload.ID]" doc:name="set-request-id" doc:description="Request to expire"/>
+			<try doc:name="try-expire" doc:description="A request decided in the meantime is skipped">
+				<flow-ref name="request-expire-subflow" doc:name="flow-ref-request-expire" doc:description="Marks it EXPIRED"/>
+				<error-handler>
+					<on-error-continue type="APP:INVALID_TRANSITION" logException="false" doc:name="on-error-already-decided" doc:description="Someone decided first"/>
+				</error-handler>
+			</try>
+		</foreach>
+	</sub-flow>
+
+	<sub-flow name="request-expire-subflow" doc:name="request-expire-subflow" doc:description="PENDING to EXPIRED by the system">
+		<set-variable variableName="transition" doc:name="set-transition-expired" doc:description="To EXPIRED"
+			value="#[output application/java --- { 'from': 'PENDING', to: 'EXPIRED', decision: false, actor: 'papi-order-requests', note: 'No decision within ' ++ p('requests.expiryHours') ++ ' h' }]"/>
+		<flow-ref name="request-transition-subflow" doc:name="flow-ref-transition-expired" doc:description="Conditional update and history step"/>
+	</sub-flow>
+
+</mule>

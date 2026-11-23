@@ -1,0 +1,208 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:amqp="http://www.mulesoft.org/schema/mule/amqp"
+	xmlns:db="http://www.mulesoft.org/schema/mule/db"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/amqp http://www.mulesoft.org/schema/mule/amqp/current/mule-amqp.xsd
+		http://www.mulesoft.org/schema/mule/db http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd
+		http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+		http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+	<!-- Correction requests (P07 idempotent receiver, P09 asynchronous response). A request is stored with its unique
+	     key as PENDING and answered with 202 at once; nothing is applied until a person approves (decisions.xml). -->
+
+	<!-- ================================================================== POST /order-requests -->
+	<flow name="requests-create-flow" doc:name="requests-create-flow"
+		doc:description="Stores the request as PENDING (202 with Location); repeating the Idempotency-Key returns the first request">
+		<set-variable variableName="newRequest" value="#[output application/java --- payload]" doc:name="set-new-request" doc:description="The requested correction"/>
+		<set-variable variableName="idempotencyKey" value="#[output application/java --- attributes.headers.'idempotency-key']" doc:name="set-idempotency-key" doc:description="Unique key of the request"/>
+		<set-variable variableName="actor" value="#[output application/java --- attributes.headers.'x-client-app' default p('requests.defaultActor')]"
+			doc:name="set-actor" doc:description="Client application that requests (the agent)"/>
+		<logger level="INFO" message="#[output application/java --- 'INIT - Request ' ++ vars.newRequest.'type' ++ ', orderId: ' ++ vars.newRequest.orderId ++ ' key: ' ++ vars.idempotencyKey ++ ' by: ' ++ vars.actor ++ ' correlationId: ' ++ correlationId]"
+			doc:name="logger-create-start" doc:description="Logs the start of the request"/>
+		<db:select config-ref="requests-db-config" doc:name="db-select-request-by-key" doc:description="Is there already a request with this key?">
+			<db:sql><![CDATA[SELECT ID FROM ORDER_REQUESTS WHERE IDEMPOTENCY_KEY = :idempotencyKey]]></db:sql>
+			<db:input-parameters><![CDATA[#[output application/java --- { idempotencyKey: vars.idempotencyKey }]]]></db:input-parameters>
+		</db:select>
+		<choice doc:name="choice-key-repeated" doc:description="A repeated key returns the first request without storing anything">
+			<when expression="#[not isEmpty(payload)]" doc:name="when-key-repeated" doc:description="Same Idempotency-Key">
+				<set-variable variableName="requestId" value="#[output application/java --- payload[0].ID]" doc:name="set-request-id-existing" doc:description="The first request"/>
+				<logger level="INFO" message="#[output application/java --- 'INFO - Repeated Idempotency-Key ' ++ vars.idempotencyKey ++ ': returning request ' ++ vars.requestId]"
+					doc:name="logger-key-repeated" doc:description="Logs the repeated key"/>
+			</when>
+			<otherwise doc:name="otherwise-new-request" doc:description="Validate and store the new request">
+				<flow-ref name="requests-store-new-subflow" doc:name="flow-ref-store-new" doc:description="Validates, stores and announces the request"/>
+			</otherwise>
+		</choice>
+		<flow-ref name="request-load-subflow" doc:name="flow-ref-request-load" doc:description="The request with its history"/>
+		<set-payload value="#[output application/json --- vars.request]" doc:name="set-payload-request" doc:description="The request"/>
+		<set-variable variableName="httpStatus" value="#[202]" doc:name="set-http-status-202" doc:description="Accepted: waiting for a decision"/>
+		<set-variable variableName="outboundHeaders" value="#[output application/java --- { Location: p('http.listener.basePath') ++ '/order-requests/' ++ vars.requestId }]"
+			doc:name="set-location" doc:description="Address of the request"/>
+	</flow>
+
+	<sub-flow name="requests-store-new-subflow" doc:name="requests-store-new-subflow"
+		doc:description="Checks the detail and the order, stores the request and its first history step, and publishes approval.requested">
+		<choice doc:name="choice-restock-detail" doc:description="RESTOCK needs item, quantity, provider and the quoted price">
+			<when expression="#[vars.newRequest.'type' == 'RESTOCK' and (vars.newRequest.detail.itemId == null or vars.newRequest.detail.quantity == null or vars.newRequest.detail.provider == null or vars.newRequest.detail.price == null)]"
+				doc:name="when-restock-incomplete" doc:description="Missing detail">
+				<raise-error type="APP:VALIDATION_ERROR" description="RESTOCK needs detail.itemId, detail.quantity, detail.provider and detail.price"
+					doc:name="raise-restock-incomplete" doc:description="Returns 400"/>
+			</when>
+		</choice>
+		<http:request method="GET" config-ref="papi-orders-http-config" path="#[output application/java --- '/orders/' ++ vars.newRequest.orderId]"
+			doc:name="http-request-order" doc:description="The order must exist; its customer goes into the events">
+			<http:headers>#[output application/java --- { 'x-correlation-id': correlationId }]</http:headers>
+			<http:response-validator>
+				<http:success-status-code-validator values="200,404"/>
+			</http:response-validator>
+		</http:request>
+		<choice doc:name="choice-order-exists" doc:description="A request needs an existing order">
+			<when expression="#[attributes.statusCode == 404]" doc:name="when-order-unknown" doc:description="papi-orders answered 404">
+				<raise-error type="APP:VALIDATION_ERROR" description="The order does not exist" doc:name="raise-order-unknown" doc:description="Returns 400"/>
+			</when>
+		</choice>
+		<set-variable variableName="customerId" value="#[output application/java --- payload.customer.id]" doc:name="set-customer-id" doc:description="Customer of the order (null when the CRM did not answer)"/>
+		<set-variable variableName="requestId" value="#[output application/java --- uuid()]" doc:name="set-request-id" doc:description="Id of the new request"/>
+		<try doc:name="try-key-race" doc:description="Two requests with the same key at the same time: the second one returns the first">
+			<try transactionalAction="ALWAYS_BEGIN" transactionType="LOCAL" doc:name="try-store-transaction" doc:description="The request and its first history step together">
+				<db:insert config-ref="requests-db-config" doc:name="db-insert-request" doc:description="Stores the request as PENDING with its expiry; the key is unique">
+					<!-- The literal and the expression go first: the Oracle driver metadata parser miscounts the binds of an INSERT
+					     when a non-bind value comes after them (IndexOutOfBoundsException, "Could not resolve query"). -->
+					<db:sql><![CDATA[INSERT INTO ORDER_REQUESTS (STATUS, EXPIRES_AT, ID, IDEMPOTENCY_KEY, ORDER_ID, CUSTOMER_ID, REQUEST_TYPE, ITEM_ID, PROVIDER_ABV, QTY, UNIT_PRICE, AMOUNT, CURRENCY, REQUESTED_BY)
+VALUES ('PENDING', SYSTIMESTAMP + INTERVAL '${requests.expiryHours}' HOUR, :id, :idempotencyKey, :orderId, :customerId, :requestType, :itemId, :provider, :qty, :unitPrice, :amount, :currency, :requestedBy)]]></db:sql>
+					<db:input-parameters><![CDATA[#[output application/java --- do {
+	var d = vars.newRequest.detail default {}
+	---
+	{
+		id: vars.requestId, idempotencyKey: vars.idempotencyKey, orderId: vars.newRequest.orderId, customerId: vars.customerId,
+		requestType: vars.newRequest.'type', itemId: d.itemId, provider: d.provider, qty: d.quantity, unitPrice: d.price,
+		amount: if (d.quantity != null and d.price != null) d.quantity * d.price else null,
+		currency: d.currency default p('currency'), requestedBy: vars.actor
+	}
+}]]]></db:input-parameters>
+				</db:insert>
+				<db:insert config-ref="requests-db-config" doc:name="db-insert-first-event" doc:description="First history step: PENDING, by the requester">
+					<db:sql><![CDATA[INSERT INTO ORDER_REQUEST_EVENTS (ID, REQUEST_ID, FROM_STATUS, TO_STATUS, ACTOR, DETAIL) VALUES (:id, :requestId, :fromStatus, :toStatus, :actor, :detail)]]></db:sql>
+					<db:input-parameters><![CDATA[#[output application/java --- { id: uuid(), requestId: vars.requestId, fromStatus: null, toStatus: 'PENDING', actor: vars.actor, detail: 'Requested' }]]]></db:input-parameters>
+				</db:insert>
+			</try>
+			<flow-ref name="publish-approval-requested-subflow" doc:name="flow-ref-publish-approval-requested" doc:description="Tells the approver"/>
+			<error-handler>
+				<on-error-continue type="ANY" when="#[(error.description default '') contains 'ORA-00001']" logException="false"
+					doc:name="on-error-key-race" doc:description="The same key was stored by another request a moment ago">
+					<db:select config-ref="requests-db-config" doc:name="db-select-request-race" doc:description="The request that won">
+						<db:sql><![CDATA[SELECT ID FROM ORDER_REQUESTS WHERE IDEMPOTENCY_KEY = :idempotencyKey]]></db:sql>
+						<db:input-parameters><![CDATA[#[output application/java --- { idempotencyKey: vars.idempotencyKey }]]]></db:input-parameters>
+					</db:select>
+					<set-variable variableName="requestId" value="#[output application/java --- payload[0].ID]" doc:name="set-request-id-race" doc:description="The first request"/>
+				</on-error-continue>
+			</error-handler>
+		</try>
+	</sub-flow>
+
+	<sub-flow name="publish-approval-requested-subflow" doc:name="publish-approval-requested-subflow"
+		doc:description="approval.requested for the approver; a broker failure is logged and the request stays stored">
+		<try doc:name="try-publish-approval" doc:description="The request is already stored: a failed announcement does not undo it">
+			<amqp:publish config-ref="rabbitmq-amqp-config" exchangeName="${rabbitmq.exchange}"
+				doc:name="amqp-publish-approval-requested" doc:description="approval.requested to exchange orders.events">
+				<amqp:routing-keys>
+					<amqp:routing-key value="${rabbitmq.approvalRequestedKey}"/>
+				</amqp:routing-keys>
+				<amqp:message>
+					<amqp:body>#[output application/json --- do {
+	var d = vars.newRequest.detail default {}
+	---
+	{
+		eventType: "approval.requested", requestId: vars.requestId, orderId: vars.newRequest.orderId, customerId: vars.customerId,
+		"type": vars.newRequest."type",
+		amount: if (d.quantity != null and d.price != null) d.quantity * d.price else 0,
+		currency: d.currency default p('currency'), requestedBy: vars.actor,
+		expiresAt: ((now() + ("PT" ++ p('requests.expiryHours') ++ "H") as Period) >> "UTC") as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"},
+		occurredAt: (now() >> "UTC") as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
+	}
+}]</amqp:body>
+					<amqp:properties contentType="application/json"/>
+				</amqp:message>
+			</amqp:publish>
+			<error-handler>
+				<on-error-continue type="ANY" logException="false" doc:name="on-error-publish-approval" doc:description="Logs the lost announcement">
+					<logger level="WARN" message="#[output application/java --- 'WARN - approval.requested not published for request ' ++ vars.requestId ++ ': ' ++ (error.description default '')]"
+						doc:name="logger-publish-approval-failed" doc:description="Logs the failure"/>
+				</on-error-continue>
+			</error-handler>
+		</try>
+	</sub-flow>
+
+	<!-- ================================================================== GET /order-requests -->
+	<flow name="requests-list-flow" doc:name="requests-list-flow" doc:description="Requests in one status (or all), newest first, with their history">
+		<ee:transform doc:name="transform-list-params" doc:description="Status and page">
+			<ee:message/>
+			<ee:variables>
+				<ee:set-variable variableName="listParams"><![CDATA[%dw 2.0
+output application/java
+var q = attributes.queryParams default {}
+var size = (q.size default p('requests.pageSize')) as Number
+---
+{ status: q.status, pageOffset: (((q.page default 1) as Number) - 1) * size, pageSize: size }]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+		<db:select config-ref="requests-db-config" doc:name="db-select-requests" doc:description="A page of requests">
+			<db:sql><![CDATA[#[output text/plain --- do { import requestColumns from modules::requests --- "SELECT " ++ requestColumns ++ " FROM ORDER_REQUESTS WHERE (:status IS NULL OR STATUS = :status) ORDER BY CREATED_AT DESC, ID OFFSET :pageOffset ROWS FETCH NEXT :pageSize ROWS ONLY" }]]]></db:sql>
+			<db:input-parameters><![CDATA[#[vars.listParams]]]></db:input-parameters>
+		</db:select>
+		<set-variable variableName="requestRows" value="#[output application/java --- payload]" doc:name="set-request-rows" doc:description="Requests of the page"/>
+		<choice doc:name="choice-any-request" doc:description="Without requests there is no history to read">
+			<when expression="#[isEmpty(vars.requestRows)]" doc:name="when-no-requests" doc:description="Empty page">
+				<set-payload value="#[output application/json --- []]" doc:name="set-payload-empty" doc:description="No requests"/>
+			</when>
+			<otherwise doc:name="otherwise-requests" doc:description="History of the page in one query">
+				<db:select config-ref="requests-db-config" doc:name="db-select-page-events" doc:description="History of every request of the page">
+					<db:sql><![CDATA[#[output text/plain --- do { import eventColumns from modules::requests --- "SELECT " ++ eventColumns ++ " FROM ORDER_REQUEST_EVENTS WHERE INSTR(',' || :ids || ',', ',' || REQUEST_ID || ',') > 0" }]]]></db:sql>
+					<db:input-parameters><![CDATA[#[output application/java --- do { import idList from modules::requests --- { ids: idList(vars.requestRows) } }]]]></db:input-parameters>
+				</db:select>
+				<ee:transform doc:name="transform-requests" doc:description="Requests with their history">
+					<ee:message>
+						<ee:set-payload><![CDATA[%dw 2.0
+import toOrderRequest from modules::requests
+output application/json
+---
+vars.requestRows map toOrderRequest($, payload)]]></ee:set-payload>
+					</ee:message>
+				</ee:transform>
+			</otherwise>
+		</choice>
+	</flow>
+
+	<!-- ================================================================= GET /order-requests/{id} -->
+	<flow name="requests-get-flow" doc:name="requests-get-flow" doc:description="Status of the request and the history of every step">
+		<set-variable variableName="requestId" value="#[output application/java --- attributes.uriParams.requestId]" doc:name="set-request-id" doc:description="Request id from the path"/>
+		<flow-ref name="request-load-subflow" doc:name="flow-ref-request-load" doc:description="The request with its history (404 when it does not exist)"/>
+		<set-payload value="#[output application/json --- vars.request]" doc:name="set-payload-request" doc:description="The request"/>
+	</flow>
+
+	<sub-flow name="request-load-subflow" doc:name="request-load-subflow" doc:description="Reads request vars.requestId with its history into vars.request; REQUEST_NOT_FOUND when it does not exist">
+		<db:select config-ref="requests-db-config" doc:name="db-select-request" doc:description="The request">
+			<db:sql><![CDATA[#[output text/plain --- do { import requestColumns from modules::requests --- "SELECT " ++ requestColumns ++ " FROM ORDER_REQUESTS WHERE ID = :id" }]]]></db:sql>
+			<db:input-parameters><![CDATA[#[output application/java --- { id: vars.requestId }]]]></db:input-parameters>
+		</db:select>
+		<choice doc:name="choice-request-exists" doc:description="No row means the request does not exist">
+			<when expression="#[isEmpty(payload)]" doc:name="when-request-not-found" doc:description="Unknown request">
+				<raise-error type="APP:REQUEST_NOT_FOUND" description="The request does not exist" doc:name="raise-request-not-found" doc:description="Returns 404"/>
+			</when>
+		</choice>
+		<set-variable variableName="requestRow" value="#[output application/java --- payload[0]]" doc:name="set-request-row" doc:description="The request row"/>
+		<db:select config-ref="requests-db-config" doc:name="db-select-request-events" doc:description="History of the request">
+			<db:sql><![CDATA[#[output text/plain --- do { import eventColumns from modules::requests --- "SELECT " ++ eventColumns ++ " FROM ORDER_REQUEST_EVENTS WHERE REQUEST_ID = :id" }]]]></db:sql>
+			<db:input-parameters><![CDATA[#[output application/java --- { id: vars.requestId }]]]></db:input-parameters>
+		</db:select>
+		<set-variable variableName="request" value="#[output application/java --- do { import toOrderRequest from modules::requests --- toOrderRequest(vars.requestRow, payload) }]"
+			doc:name="set-request" doc:description="The request in the common format"/>
+	</sub-flow>
+
+</mule>

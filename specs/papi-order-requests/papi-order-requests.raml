@@ -1,0 +1,266 @@
+#%RAML 1.0
+title: papi-order-requests
+version: v1
+baseUri: https://{host}/api/{version}
+baseUriParameters:
+  host:
+    description: Public CloudHub 2.0 endpoint of the papi-order-requests application.
+    type: string
+    example: papi-order-requests-a1b2c3.usa-e1.cloudhub.io
+protocols: [HTTPS]
+mediaType: application/json
+description: |
+  Manages the correction requests of the agent: it stores them with a unique key, controls their status and waits for
+  a person's decision. Nothing is applied until someone approves.
+  - Creation answers 202 at once with `Location`. Repeating the `Idempotency-Key` returns the same request.
+  - Statuses: PENDING → APPROVED → APPLYING → COMPLETED or FAILED. From PENDING it can also become REJECTED or
+    EXPIRED (24 h without a decision). Every transition is stored in the history with who and when.
+  - Only an approver can approve, reject or retry: the `x-client-app` header (the client_id of the caller, passed by
+    the Experience API) must be one of the configured approvers; otherwise 403 (D10). The agent can never approve.
+  - On approval it asks papi-orders to apply the correction with the same key. When it ends COMPLETED it publishes
+    `correction.applied` once (the only customer email of a correction, D18). On creation it publishes
+    `approval.requested` for the approver.
+
+uses:
+  common: ../fragments/poc-common/poc-common.raml
+
+traits:
+  approver-only:
+    description: Only an approver can do it (D10).
+    headers:
+      x-client-app:
+        description: client_id of the caller, passed by the Experience API. It must be a configured approver.
+        type: string
+        example: aprobador-tienda
+    responses:
+      403:
+        description: The caller is not an approver.
+        body:
+          application/json:
+            type: ApiError
+            example:
+              code: FORBIDDEN
+              message: Only an approver can decide on a request
+              correlationId: 0b6f2f0e-4a0c-4d25-9a4c-3d9e6a7b1c2d
+              timestamp: 2026-11-20T12:00:00-06:00
+              retryable: false
+      404:
+        description: The request does not exist.
+        body:
+          application/json:
+            type: ApiError
+            example:
+              code: REQUEST_NOT_FOUND
+              message: The request does not exist
+              correlationId: 0b6f2f0e-4a0c-4d25-9a4c-3d9e6a7b1c2d
+              timestamp: 2026-11-20T12:00:00-06:00
+              retryable: false
+      409:
+        description: The request is not in a status that allows this decision. Nothing was changed.
+        body:
+          application/json:
+            type: ApiError
+            example:
+              code: INVALID_TRANSITION
+              message: The request is REJECTED; only a PENDING request can be approved
+              correlationId: 0b6f2f0e-4a0c-4d25-9a4c-3d9e6a7b1c2d
+              timestamp: 2026-11-20T12:00:00-06:00
+              retryable: false
+
+types:
+  ApiError:
+    type: common.ErrorResponse
+    description: Error model of the API (common ErrorResponse), named locally so the approver-only trait resolves it.
+  NewOrderRequest:
+    description: |
+      A correction request on an order. RESTOCK needs itemId, quantity, provider and the quoted price;
+      REISSUE needs nothing else.
+    type: object
+    properties:
+      orderId: common.Uuid
+      type: common.RequestType
+      detail:
+        type: object
+        required: false
+        properties:
+          itemId:
+            type: common.Uuid
+            required: false
+          quantity:
+            type: integer
+            minimum: 1
+            required: false
+          provider:
+            type: common.ProviderAbv
+            required: false
+          price:
+            type: number
+            minimum: 0
+            required: false
+          currency:
+            type: common.Currency
+            required: false
+    example:
+      orderId: 10000000-0000-4000-8000-000000001002
+      type: RESTOCK
+      detail:
+        itemId: 20000000-0000-4000-8000-000000000100
+        quantity: 3
+        provider: BOR
+        price: 175.00
+        currency: MXN
+  Rejection:
+    description: Why the approver rejects the request.
+    type: object
+    properties:
+      reason:
+        type: string
+        minLength: 1
+        maxLength: 500
+    example:
+      reason: The customer already accepted a partial delivery
+
+/order-requests:
+  post:
+    displayName: Request a correction
+    description: |
+      Stores the request as PENDING and answers 202 at once; nothing is applied. Repeating the Idempotency-Key returns
+      the same request. It publishes `approval.requested`; the amount is quantity × price (3 × 175.00 = 525.00).
+    is: [common.secured, common.validated, common.retryable]
+    headers:
+      Idempotency-Key:
+        description: Unique key of the request, generated by the caller. Repeating it returns the first response.
+        type: string
+        minLength: 8
+        maxLength: 100
+        example: 7f3c2a10-9b4e-4c1d-8e2f-5a6b7c8d9e0f
+      x-client-app:
+        description: client_id of the caller (who requests), passed by the Experience API.
+        type: string
+        required: false
+        example: agente-mcp
+    body:
+      application/json:
+        type: NewOrderRequest
+    responses:
+      202:
+        description: Request accepted and waiting for a decision.
+        headers:
+          Location:
+            description: Address of the request.
+            type: string
+            example: /api/v1/order-requests/30000000-0000-4000-8000-000000000042
+        body:
+          application/json:
+            type: common.OrderRequest
+  get:
+    displayName: List requests by status
+    description: Requests in one status, newest first.
+    is: [common.secured, common.validated, common.paged, common.retryable]
+    queryParameters:
+      status:
+        type: common.RequestStatus
+        required: false
+    responses:
+      200:
+        description: Requests found (the list may be empty).
+        body:
+          application/json:
+            type: common.OrderRequest[]
+
+  /{requestId}:
+    uriParameters:
+      requestId:
+        type: common.Uuid
+    get:
+      displayName: Get request
+      description: Status of the request and the history of every step.
+      is: [common.secured, common.retryable]
+      responses:
+        200:
+          description: The request with its history.
+          body:
+            application/json:
+              type: common.OrderRequest
+        404:
+          description: The request does not exist.
+          body:
+            application/json:
+              type: common.ErrorResponse
+              example:
+                code: REQUEST_NOT_FOUND
+                message: The request does not exist
+                correlationId: 0b6f2f0e-4a0c-4d25-9a4c-3d9e6a7b1c2d
+                timestamp: 2026-11-20T12:00:00-06:00
+                retryable: false
+
+    /approve:
+      post:
+        displayName: Approve
+        description: |
+          Approves a PENDING request and applies it through papi-orders with the same key. It ends COMPLETED and
+          publishes `correction.applied` once, or FAILED (retry with `/retry`) without publishing anything.
+        is: [common.secured, approver-only, common.retryable]
+        responses:
+          200:
+            description: The request after the decision (COMPLETED or FAILED) with its history.
+            body:
+              application/json:
+                type: common.OrderRequest
+                example:
+                  requestId: 30000000-0000-4000-8000-000000000042
+                  orderId: 10000000-0000-4000-8000-000000001002
+                  type: RESTOCK
+                  status: COMPLETED
+                  detail:
+                    itemId: 20000000-0000-4000-8000-000000000100
+                    quantity: 3
+                    provider: BOR
+                    price: 175.00
+                    currency: MXN
+                  idempotencyKey: 7f3c2a10-9b4e-4c1d-8e2f-5a6b7c8d9e0f
+                  requestedBy: agente-mcp
+                  requestedAt: 2026-11-20T12:40:00-06:00
+                  expiresAt: 2026-11-21T12:40:00-06:00
+                  decidedBy: aprobador-tienda
+                  decidedAt: 2026-11-20T12:44:00-06:00
+                  history:
+                    - status: PENDING
+                      actor: agente-mcp
+                      at: 2026-11-20T12:40:00-06:00
+                    - status: APPROVED
+                      actor: aprobador-tienda
+                      at: 2026-11-20T12:44:00-06:00
+                    - status: APPLYING
+                      actor: papi-order-requests
+                      at: 2026-11-20T12:44:01-06:00
+                    - status: COMPLETED
+                      actor: papi-order-requests
+                      at: 2026-11-20T12:44:03-06:00
+
+    /reject:
+      post:
+        displayName: Reject
+        description: Rejects a PENDING request with a reason. Nothing is applied and no event is published.
+        is: [common.secured, common.validated, approver-only]
+        body:
+          application/json:
+            type: Rejection
+        responses:
+          200:
+            description: The request REJECTED with its history.
+            body:
+              application/json:
+                type: common.OrderRequest
+
+    /retry:
+      post:
+        displayName: Retry a failed request
+        description: Applies a FAILED request again with the same key (papi-orders moves nothing twice).
+        is: [common.secured, approver-only, common.retryable]
+        responses:
+          200:
+            description: The request after the retry (COMPLETED or FAILED) with its history.
+            body:
+              application/json:
+                type: common.OrderRequest

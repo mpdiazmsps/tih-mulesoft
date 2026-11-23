@@ -1,0 +1,201 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:munit="http://www.mulesoft.org/schema/mule/munit"
+	xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+		http://www.mulesoft.org/schema/mule/munit http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+		http://www.mulesoft.org/schema/mule/munit-tools http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd">
+
+	<!-- End-to-end HTTP tests: real listener (8085), APIkit with the Exchange contract, interface flows,
+	     global error handler and response codes. The store, papi-orders and RabbitMQ are mocked. -->
+	<munit:config name="papi-order-requests-main-test.xml"/>
+
+	<munit:before-suite name="papi-order-requests-main-warm-up" description="APIkit builds its routes from the flows already initialized">
+		<choice>
+			<when expression="#[false]">
+				<flow-ref name="post:\order-requests:application\json:papi-order-requests-config"/>
+				<flow-ref name="get:\order-requests:papi-order-requests-config"/>
+				<flow-ref name="get:\order-requests\(requestId):papi-order-requests-config"/>
+				<flow-ref name="post:\order-requests\(requestId)\approve:papi-order-requests-config"/>
+				<flow-ref name="post:\order-requests\(requestId)\reject:application\json:papi-order-requests-config"/>
+				<flow-ref name="post:\order-requests\(requestId)\retry:papi-order-requests-config"/>
+			</when>
+		</choice>
+	</munit:before-suite>
+
+	<http:request-config name="test-api-client" doc:name="HTTP Request configuration">
+		<http:request-connection host="localhost" port="8085"/>
+	</http:request-config>
+
+	<munit:test name="api_createRequest_returns202WithLocation" description="POST /order-requests returns 202 with Location and the request PENDING">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="papi-order-requests-main"/>
+		</munit:enable-flow-sources>
+		<munit:behavior>
+			<munit-tools:mock-when processor="db:select">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="db-select-request-by-key"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/java --- []]" mediaType="application/java"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit-tools:mock-when processor="http:request">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="http-request-order"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/json --- { orderId: '10000000-0000-4000-8000-000000001002', status: 'CONFIRMED', customer: { id: '003Hs00000CUMBRAAA', name: 'Constructora Cumbres', segment: 'STRATEGIC' } }]" mediaType="application/json"/>
+					<munit-tools:attributes value="#[{ statusCode: 200, headers: { 'content-type': 'application/json' } }]"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit-tools:mock-when processor="db:insert">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="db-insert-request"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/java --- { affectedRows: 1 }]" mediaType="application/java"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit-tools:mock-when processor="db:insert">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="db-insert-first-event"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/java --- { affectedRows: 1 }]" mediaType="application/java"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit-tools:mock-when processor="amqp:publish">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="amqp-publish-approval-requested"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return/>
+			</munit-tools:mock-when>
+			<munit-tools:mock-when processor="amqp:publish">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="amqp-publish-correction-applied"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return/>
+			</munit-tools:mock-when>
+			<munit-tools:mock-when processor="db:select">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="db-select-request"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/java --- [ { ID: '30000000-0000-4000-8000-000000000042', IDEMPOTENCY_KEY: '7f3c2a10-9b4e-4c1d-8e2f-5a6b7c8d9e0f', ORDER_ID: '10000000-0000-4000-8000-000000001002', CUSTOMER_ID: '003Hs00000CUMBRAAA', REQUEST_TYPE: 'RESTOCK', ITEM_ID: '20000000-0000-4000-8000-000000000100', PROVIDER_ABV: 'BOR', QTY: 3, UNIT_PRICE: 175, AMOUNT: 525, CURRENCY: 'MXN', STATUS: 'PENDING', REQUESTED_BY: 'agente-mcp', DECIDED_BY: null, DECIDED_AT: null, REASON: null, EXPIRES_AT: '20261121184000', CREATED_AT: '20261120184000' } ]]" mediaType="application/java"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit-tools:mock-when processor="db:select">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="db-select-request-events"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/java --- [ { REQUEST_ID: '30000000-0000-4000-8000-000000000042', TO_STATUS: 'PENDING', ACTOR: 'agente-mcp', DETAIL: null, EVENT_AT: '20261120184000', EVENT_ORDER: '20261120184000000001' } ]]" mediaType="application/java"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+		</munit:behavior>
+		<munit:execution>
+			<http:request method="POST" config-ref="test-api-client" path="/api/v1/order-requests">
+				<http:body><![CDATA[#[output application/json --- { orderId: '10000000-0000-4000-8000-000000001002', 'type': 'RESTOCK', detail: { itemId: '20000000-0000-4000-8000-000000000100', quantity: 3, provider: 'BOR', price: 175, currency: 'MXN' } }]]]></http:body>
+				<http:headers><![CDATA[#[{ client_id: 'test-id', client_secret: 'test-secret', 'Content-Type': 'application/json', 'Idempotency-Key': '7f3c2a10-9b4e-4c1d-8e2f-5a6b7c8d9e0f', 'x-client-app': 'agente-mcp' }]]]></http:headers>
+				<http:response-validator><http:success-status-code-validator values="0..599"/></http:response-validator>
+			</http:request>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[output application/java --- attributes.statusCode]" is="#[MunitTools::equalTo(202)]"/>
+			<munit-tools:assert-that expression="#[output application/java --- payload.status]" is="#[MunitTools::equalTo('PENDING')]"/>
+			<munit-tools:assert-that expression="#[output application/java --- attributes.headers.location startsWith '/api/v1/order-requests/']" is="#[MunitTools::equalTo(true)]"/>
+		</munit:validation>
+	</munit:test>
+
+	<munit:test name="api_createWithoutIdempotencyKey_returns400" description="Idempotency-Key is required by the contract">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="papi-order-requests-main"/>
+		</munit:enable-flow-sources>
+		<munit:execution>
+			<http:request method="POST" config-ref="test-api-client" path="/api/v1/order-requests">
+				<http:body><![CDATA[#[output application/json --- { orderId: '10000000-0000-4000-8000-000000001002', 'type': 'RESTOCK', detail: { itemId: '20000000-0000-4000-8000-000000000100', quantity: 3, provider: 'BOR', price: 175, currency: 'MXN' } }]]]></http:body>
+				<http:headers><![CDATA[#[{ client_id: 'test-id', client_secret: 'test-secret', 'Content-Type': 'application/json' }]]]></http:headers>
+				<http:response-validator><http:success-status-code-validator values="0..599"/></http:response-validator>
+			</http:request>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[output application/java --- attributes.statusCode]" is="#[MunitTools::equalTo(400)]"/>
+			<munit-tools:assert-that expression="#[output application/java --- payload.code]" is="#[MunitTools::equalTo('VALIDATION_ERROR')]"/>
+		</munit:validation>
+	</munit:test>
+
+	<munit:test name="api_approveByAgent_returns403" description="The agent cannot approve: 403 FORBIDDEN">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="papi-order-requests-main"/>
+		</munit:enable-flow-sources>
+		<munit:execution>
+			<http:request method="POST" config-ref="test-api-client" path="/api/v1/order-requests/30000000-0000-4000-8000-000000000042/approve">
+				<http:headers><![CDATA[#[{ client_id: 'test-id', client_secret: 'test-secret', 'x-client-app': 'agente-mcp' }]]]></http:headers>
+				<http:response-validator><http:success-status-code-validator values="0..599"/></http:response-validator>
+			</http:request>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[output application/java --- attributes.statusCode]" is="#[MunitTools::equalTo(403)]"/>
+			<munit-tools:assert-that expression="#[output application/java --- payload.code]" is="#[MunitTools::equalTo('FORBIDDEN')]"/>
+		</munit:validation>
+	</munit:test>
+
+	<munit:test name="api_getUnknown_returns404" description="An unknown request returns 404 REQUEST_NOT_FOUND">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="papi-order-requests-main"/>
+		</munit:enable-flow-sources>
+		<munit:behavior>
+			<munit-tools:mock-when processor="db:select">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="db-select-request"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/java --- []]" mediaType="application/java"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+		</munit:behavior>
+		<munit:execution>
+			<http:request method="GET" config-ref="test-api-client" path="/api/v1/order-requests/30000000-0000-4000-8000-000000009999">
+				<http:headers><![CDATA[#[{ client_id: 'test-id', client_secret: 'test-secret' }]]]></http:headers>
+				<http:response-validator><http:success-status-code-validator values="0..599"/></http:response-validator>
+			</http:request>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[output application/java --- attributes.statusCode]" is="#[MunitTools::equalTo(404)]"/>
+			<munit-tools:assert-that expression="#[output application/java --- payload.code]" is="#[MunitTools::equalTo('REQUEST_NOT_FOUND')]"/>
+		</munit:validation>
+	</munit:test>
+
+	<munit:test name="api_storeDown_returns503" description="With the store down the listing returns a retryable 503">
+		<munit:enable-flow-sources>
+			<munit:enable-flow-source value="papi-order-requests-main"/>
+		</munit:enable-flow-sources>
+		<munit:behavior>
+			<munit-tools:mock-when processor="db:select">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute attributeName="doc:name" whereValue="db-select-requests"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:error typeId="DB:CONNECTIVITY"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+		</munit:behavior>
+		<munit:execution>
+			<http:request method="GET" config-ref="test-api-client" path="/api/v1/order-requests?status=PENDING">
+				<http:headers><![CDATA[#[{ client_id: 'test-id', client_secret: 'test-secret' }]]]></http:headers>
+				<http:response-validator><http:success-status-code-validator values="0..599"/></http:response-validator>
+			</http:request>
+		</munit:execution>
+		<munit:validation>
+			<munit-tools:assert-that expression="#[output application/java --- attributes.statusCode]" is="#[MunitTools::equalTo(503)]"/>
+			<munit-tools:assert-that expression="#[output application/java --- payload.retryable]" is="#[MunitTools::equalTo(true)]"/>
+		</munit:validation>
+	</munit:test>
+
+</mule>
